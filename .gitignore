@@ -1,0 +1,21 @@
+# Python environments and generated files
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local configuration and service data
+.env
+postgres-data/
+rabbitmq-data/
+elasticsearch-data/
+minio-data/

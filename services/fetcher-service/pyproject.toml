@@ -1,0 +1,30 @@
+[project]
+name = "crawler-fetcher-service"
+version = "0.1.0"
+description = "HTTP fetch worker for the Web Crawler."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aio-pika>=9.5,<10",
+    "aiohttp>=3.14,<4",
+    "aioboto3>=15,<16",
+    "crawler-contracts>=0.1.0",
+    "redis>=6.4,<7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.25,<1",
+    "ruff>=0.9,<1",
+]
+
+[tool.uv.sources]
+crawler-contracts = { path = "../../shared-contracts", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.9,<0.10"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "crawler_fetcher"
