@@ -244,7 +244,6 @@ queued → skipped
 | `pages` | Fetched page metadata, title, extracted text, and HTTP status |
 | `keywords` | Normalized keyword dictionary |
 | `page_keywords` | Page-to-keyword relationship and score |
-| `extracted_links` | Normalized links retained until downstream delivery completes |
 | `outbox_events` | Durable events waiting for RabbitMQ publisher confirmation |
 | `processed_events` | Consumed handler and event IDs; `UNIQUE (consumer_name, event_id)` enforces idempotency |
 
@@ -352,7 +351,7 @@ An existing URL can have an unpublished outbox event, so duplicate URL admission
 ```text
 consume page.fetched
     ↓
-transaction: save page, keywords, extracted links, processed_events, and mark indexing pending
+transaction: save page, keywords, processed_events, and mark indexing pending
     ↓
 index the page in Elasticsearch with page_id as a deterministic document ID
     ↓
