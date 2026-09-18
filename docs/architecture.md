@@ -230,12 +230,15 @@ URL statuses follow this state flow:
 ```text
 queued → fetching → fetched
 queued or fetching → failed
+fetching → queued (retry or expired lease)
 queued → skipped
 ```
 
 `fetched` means that Content successfully persisted and indexed the page. An HTTP 200 response alone does not mark a URL as fetched.
 
 `fetch.started` moves a URL from `queued` to `fetching` and sets `lease_until`. Frontier accepts `fetch.started` only when its `fetch_attempt` matches the currently scheduled attempt. A recovery task periodically finds `fetching` rows with expired leases. It schedules a new bounded attempt through the retry-delay queue, or marks the URL `failed` when the attempt limit is exhausted. A worker crash after `fetch.started` therefore cannot leave a URL in `fetching` forever.
+
+The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; deployment environment variables will supply them when the service runtime is added.
 
 ### `content_db`
 
@@ -524,6 +527,10 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |
 | `MAX_CRAWL_DEPTH` | Frontier | Maximum link depth from a seed |
 | `MAX_URLS_PER_CRAWL` | Frontier | Crawl size limit |
+| `MAX_FETCH_ATTEMPTS` | Frontier | Maximum number of fetch attempts per URL; default `3` |
+| `FETCH_LEASE_SECONDS` | Frontier | Lease duration after `fetch.started`; default `120` |
+| `MAX_URL_LENGTH` | Frontier | Maximum accepted URL length; default `4096` |
+| `ADDITIONAL_ALLOWED_HOSTS` | Frontier | Optional explicit host allowlist in addition to seed hosts |
 
 ## Acceptance Criteria
 
