@@ -158,7 +158,7 @@ Responsibilities:
 - Publish `page.failed` for final failures.
 - Classify transient errors and calculate a suggested delay using exponential backoff, jitter, and `Retry-After`.
 
-Dependencies: aiohttp, aio-pika, redis-py, aioboto3, shared contracts.
+Dependencies: aiohttp, aio-pika, Pydantic, pydantic-settings, redis-py, aioboto3, shared contracts.
 
 Multiple Fetcher containers can consume the same queue. RabbitMQ distributes each fetch message to one consumer.
 
@@ -534,7 +534,7 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `FETCH_CONCURRENCY` | Fetcher | Maximum parallel HTTP requests per replica |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | Fetcher | Connection timeout |
 | `HTTP_READ_TIMEOUT_SECONDS` | Fetcher | Socket read timeout |
-| `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size |
+| `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size; default `5 MiB`, maximum `50 MiB` |
 | `ORIGIN_REQUESTS_PER_SECOND` | Fetcher | Per-origin request rate |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |
 | `MAX_CRAWL_DEPTH` | Frontier | Maximum link depth from a seed |
