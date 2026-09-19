@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from crawler_contracts.events import (
     CrawlerEvent,
+    FetchRetryRequestedEvent,
     FetchStartedEvent,
     FetchUrlEvent,
     LinksExtractedEvent,
@@ -33,6 +34,14 @@ def fetch_envelope() -> dict[str, object]:
     [
         (FetchUrlEvent, {"url": "https://example.com/", "depth": 0}),
         (FetchStartedEvent, {"lease_seconds": 60}),
+        (
+            FetchRetryRequestedEvent,
+            {
+                "category": "timeout",
+                "detail": "Read timed out",
+                "suggested_delay_seconds": 5,
+            },
+        ),
         (
             PageFetchedEvent,
             {
@@ -111,6 +120,26 @@ def test_event_rejects_unknown_fields() -> None:
             **fetch_envelope(),
             lease_seconds=60,
             unexpected="value",
+        )
+
+
+def test_fetch_retry_requested_event_requires_a_positive_delay() -> None:
+    with pytest.raises(ValidationError, match="suggested_delay_seconds"):
+        FetchRetryRequestedEvent(
+            **fetch_envelope(),
+            category="timeout",
+            detail="Read timed out",
+            suggested_delay_seconds=0,
+        )
+
+
+def test_fetch_retry_requested_event_rejects_a_content_failure_category() -> None:
+    with pytest.raises(ValidationError, match="category"):
+        FetchRetryRequestedEvent(
+            **fetch_envelope(),
+            category="parsing",
+            detail="The document could not be parsed",
+            suggested_delay_seconds=5,
         )
 
 

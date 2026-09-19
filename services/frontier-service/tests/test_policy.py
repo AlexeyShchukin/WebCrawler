@@ -53,8 +53,11 @@ def test_lease_is_expired_at_its_deadline() -> None:
         (UrlStatus.QUEUED, UrlStatus.FETCHING),
         (UrlStatus.QUEUED, UrlStatus.SKIPPED),
         (UrlStatus.FETCHING, UrlStatus.QUEUED),
+        (UrlStatus.FETCHING, UrlStatus.DOWNLOADED),
         (UrlStatus.FETCHING, UrlStatus.FETCHED),
         (UrlStatus.FETCHING, UrlStatus.FAILED),
+        (UrlStatus.DOWNLOADED, UrlStatus.FETCHED),
+        (UrlStatus.DOWNLOADED, UrlStatus.FAILED),
     ],
 )
 def test_state_machine_allows_documented_transitions(current: UrlStatus, target: UrlStatus) -> None:
@@ -64,3 +67,7 @@ def test_state_machine_allows_documented_transitions(current: UrlStatus, target:
 def test_state_machine_rejects_terminal_state_transition() -> None:
     with pytest.raises(InvalidStateTransition):
         transition(current=UrlStatus.FETCHED, target=UrlStatus.QUEUED)
+
+
+def test_state_machine_includes_a_downloaded_state() -> None:
+    assert "downloaded" in UrlStatus

@@ -79,7 +79,7 @@ class FailureStage(StrEnum):
 
 
 class FailureCategory(StrEnum):
-    """Stable categories used for retry policy and operational metrics."""
+    """Stable categories used for final failures and operational metrics."""
 
     CONNECTION = "connection"
     TIMEOUT = "timeout"
@@ -90,6 +90,23 @@ class FailureCategory(StrEnum):
     PARSING = "parsing"
     INDEXING = "indexing"
     INTERNAL = "internal"
+
+
+class FetchRetryCategory(StrEnum):
+    """Retryable failure categories for one started fetch execution."""
+
+    CONNECTION = "connection"
+    TIMEOUT = "timeout"
+    HTTP_STATUS = "http_status"
+    OBJECT_STORAGE = "object_storage"
+
+
+class FetchRetryRequestedEvent(CrawlerEvent):
+    """A retryable fetch-execution failure for Frontier to reschedule."""
+
+    category: FetchRetryCategory
+    detail: Annotated[str, Field(min_length=1, max_length=1000)]
+    suggested_delay_seconds: Annotated[int, Field(ge=1, le=3600)]
 
 
 class PageFailedEvent(CrawlerEvent):
