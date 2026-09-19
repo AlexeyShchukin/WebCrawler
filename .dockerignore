@@ -1,0 +1,15 @@
+.git
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+**/.pytest_cache
+.ruff_cache
+**/.ruff_cache
+*.py[cod]
+.env
+postgres-data
+rabbitmq-data
+elasticsearch-data
+minio-data
