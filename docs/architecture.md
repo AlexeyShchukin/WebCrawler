@@ -225,6 +225,12 @@ This database constraint protects against cycles, duplicate links on one page, a
 | `outbox_events` | Durable events waiting for RabbitMQ publisher confirmation |
 | `processed_events` | Consumed handler and event IDs; `UNIQUE (consumer_name, event_id)` enforces idempotency |
 
+### Reliable event table schema
+
+`outbox_events` has `event_id` as its primary key, plus `routing_key`, JSON `payload`, `created_at`, nullable `published_at`, `publish_attempts`, and nullable `last_publish_error`. An event is pending while `published_at` is `NULL`; a publisher records the confirmation timestamp only after RabbitMQ confirms receipt.
+
+`processed_events` has a surrogate `id`, `consumer_name`, `event_id`, and `processed_at`, with `UNIQUE (consumer_name, event_id)`. The unique constraint allows different named consumer handlers in one service to process the same incoming event while preventing the same handler from applying it twice.
+
 URL statuses follow this state flow:
 
 ```text
