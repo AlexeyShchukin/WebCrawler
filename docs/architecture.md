@@ -10,7 +10,7 @@ The architecture uses four independently deployable services. Every service has 
 
 - Crawl URLs reachable from configured seed URLs.
 - Store every discovered page as a graph node and every discovered hyperlink as a graph edge.
-- Fetch each normalized URL at most once per crawl run.
+- Avoid duplicate fetch tasks for each normalized URL while allowing bounded retries after a started fetch execution fails.
 - Extract page title, visible text, links, and weighted keywords.
 - Search indexed content by words and phrases.
 - Scale HTTP fetching independently from API traffic and content processing.
@@ -33,9 +33,9 @@ flowchart LR
     Broker -->|fetch.url| Fetcher[Fetcher Service]
     Fetcher -->|HTTP GET| Web[Public websites]
     Fetcher --> Objects[(S3-compatible Object Storage\nMinIO locally)]
-    Fetcher -->|page.fetched or page.failed| Broker
-    Fetcher -->|page.failed| Broker
+    Fetcher -->|page.fetched, fetch.retry_requested, or page.failed| Broker
     Broker -->|page.fetched| Content[Content Service]
+    Broker -->|page.fetched| Frontier
     Content -->|read content_ref| Objects
     Content --> ContentDB[(PostgreSQL\ncontent_db)]
     Content --> ES[(Elasticsearch)]
@@ -43,18 +43,19 @@ flowchart LR
     Content -->|links.extracted| Broker
     Content -->|page.processed| Broker
     Content -->|page.failed| Broker
-    Broker -->|links.extracted / page.processed / page.failed| Frontier
+    Broker -->|fetch.retry_requested / links.extracted / page.processed / page.failed| Frontier
 ```
 
 ### Data flow
 
 1. The API Service accepts seed URLs and creates a crawl through the Frontier Service's internal HTTP API.
 2. Frontier stores new URLs and publishes a `fetch.url` message for each accepted URL.
-3. Fetcher consumes the message, publishes `fetch.started`, downloads the page within the configured response-size limit, stores its raw HTML in object storage, and publishes either `page.fetched` with `content_ref` or `page.failed`.
-4. Content consumes successful pages, reads raw HTML from object storage using `content_ref`, extracts content and links, saves content data, and indexes the page.
-5. Content publishes `links.extracted` and `page.processed`.
-6. Frontier saves graph edges, admits only new URLs, and marks processed pages as fetched.
-7. The API Service retrieves search and page data from Content's internal HTTP API and crawl status from Frontier.
+3. Fetcher consumes the message and first acquires Redis origin permission. If permission infrastructure is temporarily unavailable, it sends the unchanged message through the broker retry route without allocating a new attempt. Otherwise it publishes `fetch.started` immediately before fetch execution, downloads the page within the configured response-size limit, stores its raw HTML in object storage, and publishes `page.fetched` with `content_ref`, `fetch.retry_requested` for a retryable fetch-execution failure, or `page.failed` for a final failure.
+4. Frontier consumes its copy of `page.fetched`, clears the fetch lease, and moves the matching URL to `downloaded`. Frontier consumes `fetch.retry_requested` only for a matching started execution. It alone allocates the next attempt and writes the delayed `fetch.url` event through its outbox. A stale event is ignored.
+5. Content consumes successful pages, reads raw HTML from object storage using `content_ref`, extracts content and links, saves content data, and indexes the page.
+6. Content publishes `links.extracted` and `page.processed`.
+7. Frontier saves graph edges, admits only new URLs, and marks processed pages as fetched.
+8. The API Service retrieves search and page data from Content's internal HTTP API and crawl status from Frontier.
 
 ## Technology Choices
 
@@ -82,15 +83,18 @@ The broker uses a topic exchange named `crawler.topic`.
 | Routing key | Queue | Producer | Consumer | Payload |
 |---|---|---|---|---|
 | `fetch.url` | `fetch.url.queue` | Frontier | Fetcher | `crawl_id`, `url_id`, `url`, `depth`, `fetch_attempt` |
+| `fetch.url.retry` | `fetch.url.retry.delay.queue` | Fetcher | RabbitMQ retry topology | Unchanged `FetchUrlEvent`; TTL and dead-letter routing return it to `fetch.url.queue` |
 | `fetch.started` | `fetch.started.queue` | Fetcher | Frontier | URL identity, fetch attempt identity, and lease duration |
-| `page.fetched` | `page.fetched.queue` | Fetcher | Content | URL identity, status, content type, and object-storage `content_ref` |
+| `fetch.retry_requested` | `fetch.retry-requested.queue` | Fetcher | Frontier | URL identity, current attempt, failure category, and suggested delay |
+| `page.fetched` | `page.fetched.content.queue` | Fetcher | Content | URL identity, status, content type, and object-storage `content_ref` |
+| `page.fetched` | `page.fetched.frontier.queue` | Fetcher | Frontier | URL identity, fetch attempt identity, and `content_ref` for lease release |
 | `links.extracted` | `links.extracted.queue` | Content | Frontier | Source URL identity and extracted links |
 | `page.processed` | `page.processed.queue` | Content | Frontier | URL identity, page identity, processing outcome |
 | `page.failed` | `page.failed.queue` | Fetcher or Content | Frontier | URL identity, pipeline stage, error category, and `fetch_attempt` |
 
-Every message includes `event_id`, `crawl_id`, and `created_at`. Events in the current fetch pipeline also include `fetch_attempt`, which identifies the fetch lifecycle attempt and lets consumers reject stale results. Consumers acknowledge a message only after their local state is saved. A consumer may receive a message more than once, so all consumers must be idempotent. `page.fetched` contains metadata and an opaque object-storage reference; RabbitMQ never transports raw HTML.
+Every message includes `event_id`, `crawl_id`, and `created_at`. Events in the current fetch pipeline also include `fetch_attempt`, which identifies the Frontier-allocated fetch execution and lets consumers reject stale results. A temporary failure before `fetch.started` does not increment it. Consumers acknowledge a message only after their local state is saved. A message may be delivered more than once, so all consumers must be idempotent. `page.fetched` contains metadata and an opaque object-storage reference; RabbitMQ never transports raw HTML.
 
-Messages that exceed the configured retry limit are routed to a dead-letter queue. The dead-letter queue is monitored and can be replayed after the underlying issue is fixed.
+Messages that exceed their configured delivery retry limit are routed to a dead-letter queue. Delivery retries are independent of `fetch_attempt`. The dead-letter queue is monitored and can be replayed after the underlying issue is fixed.
 
 ## Services
 
@@ -132,7 +136,7 @@ Responsibilities:
 - Apply scope, depth, and crawl-size limits.
 - Store URL nodes and link edges.
 - Publish fetch tasks for newly discovered URLs.
-- Consume links, processing results, and failures.
+- Consume links, processing results, retry requests, and failures.
 - Manage fetch leases and recover abandoned fetch attempts.
 - Expose internal endpoints for crawl creation and status.
 
@@ -149,9 +153,10 @@ Responsibilities:
 - Enforce outbound HTTP safety controls.
 - Enforce a maximum response size before accepting a response.
 - Store accepted HTML in object storage under a deterministic object key.
-- Publish `fetch.started` before processing a task and `page.fetched` after successfully storing the accepted HTML.
+- Acquire Redis origin permission before publishing `fetch.started`; publish `fetch.started` immediately before the outbound HTTP attempt and `page.fetched` after successfully storing the accepted HTML.
+- Publish `fetch.retry_requested` for retryable failures after `fetch.started`. Fetcher never increments `fetch_attempt` or publishes to the primary `fetch.url` route.
 - Publish `page.failed` for final failures.
-- Retry transient errors using exponential backoff and jitter.
+- Classify transient errors and calculate a suggested delay using exponential backoff, jitter, and `Retry-After`.
 
 Dependencies: aiohttp, aio-pika, redis-py, aioboto3, shared contracts.
 
@@ -234,15 +239,16 @@ This database constraint protects against cycles, duplicate links on one page, a
 URL statuses follow this state flow:
 
 ```text
-queued → fetching → fetched
-queued or fetching → failed
+queued → fetching → downloaded → fetched
+fetching → fetched (out-of-order `page.processed`)
+queued, fetching, or downloaded → failed
 fetching → queued (retry or expired lease)
 queued → skipped
 ```
 
-`fetched` means that Content successfully persisted and indexed the page. An HTTP 200 response alone does not mark a URL as fetched.
+`downloaded` means that Fetcher successfully stored raw HTML and Frontier released the fetch lease. `fetched` means that Content successfully persisted and indexed the page. An HTTP 200 response alone does not mark a URL as fetched.
 
-`fetch.started` moves a URL from `queued` to `fetching` and sets `lease_until`. Frontier accepts `fetch.started` only when its `fetch_attempt` matches the currently scheduled attempt. A recovery task periodically finds `fetching` rows with expired leases. It schedules a new bounded attempt through the retry-delay queue, or marks the URL `failed` when the attempt limit is exhausted. A worker crash after `fetch.started` therefore cannot leave a URL in `fetching` forever.
+`fetch.started` moves a URL from `queued` to `fetching` and sets `lease_until`. Frontier accepts it only when its `fetch_attempt` matches the currently scheduled execution. `page.fetched` moves a matching `fetching` URL to `downloaded` and clears the fetch lease; it is delivered independently to Frontier and Content. `page.processed` moves a matching `downloaded` URL to `fetched`. Frontier also accepts a matching `page.processed` from `fetching` to tolerate cross-queue delivery order; a later `page.fetched` is then stale and ignored. A Fetcher `page.failed` is accepted only from `fetching`; a Content `page.failed` is accepted from `downloaded` or `fetching` for the same ordering reason. For `fetch.retry_requested`, Frontier verifies that the row is still `fetching` and its stored attempt matches the event. In one transaction it either increments the stored attempt, returns the URL to `queued`, and writes a delayed `fetch.url` outbox event, or marks the URL `failed` when the attempt limit is exhausted. A recovery task periodically finds `fetching` rows with expired leases and follows the same Frontier-owned scheduling path. A worker crash after `fetch.started` therefore cannot leave a URL in `fetching` forever.
 
 The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; deployment environment variables will supply them when the service runtime is added.
 
@@ -281,7 +287,7 @@ These controls belong to existing services; they do not require additional micro
 | Response limit | Stream the body and stop after the configured maximum size |
 | Object upload | Upload accepted HTML before publishing `page.fetched`; use a deterministic key based on `crawl_id`, `url_id`, and `fetch_attempt` |
 | MIME validation | Process only HTML and XHTML content types |
-| Retry policy | Retry connection errors, timeouts, 408, 429, and selected 5xx responses |
+| Retry classification | Identify retryable connection, timeout, HTTP status, and object-storage failures after `fetch.started` |
 | Exponential backoff | Increase delay after each failure, capped at a configured maximum |
 | Jitter | Randomize each retry delay to prevent synchronized retry bursts |
 | `Retry-After` | Respect server-provided retry delay when present |
@@ -292,12 +298,12 @@ These controls belong to existing services; they do not require additional micro
 
 Fetcher owns outbound HTTP policy. All Fetcher replicas coordinate through Redis:
 
-- An atomic Redis Lua script implements the per-origin token bucket or minimum-delay check.
+- An atomic Redis operation enforces a per-origin minimum delay between HTTP requests across all Fetcher replicas.
 - Redis stores the circuit-breaker state, failure count, and cooldown for each origin.
 - A Fetcher acquires origin permission before opening an HTTP connection.
-- If Redis is unavailable, Fetcher does not bypass the policy. It routes the task to a delayed retry queue with bounded attempts; exhaustion sends it to the DLQ.
+- If Redis is unavailable, Fetcher does not bypass the policy. It publishes the unchanged `FetchUrlEvent` to the `fetch.url.retry` route and acknowledges the original only after the delayed copy has been successfully published and confirmed by RabbitMQ. TTL and dead-letter routing return it to `fetch.url.queue` with the same `fetch_attempt`.
 
-`redis-py` provides an asyncio client, shared connection pool support, and Lua script registration for atomic operations. [redis-py asyncio documentation](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html).
+Fetcher calculates a suggested retry delay only after a retryable fetch-execution failure. Frontier is the sole authority for attempt allocation, retry limits, and publishing the next primary `fetch.url` event. The Fetcher/RabbitMQ delivery loop handles temporary failures before `fetch.started` without allocating another attempt. `redis-py` provides an asyncio client, shared connection pool support, and Lua script registration for atomic operations. [redis-py asyncio documentation](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html).
 
 ### Internal service APIs
 
@@ -325,7 +331,7 @@ Frontier exposes `POST /internal/crawls` and `GET /internal/crawls/{crawl_id}`. 
 - Publish persistent messages.
 - Use manual acknowledgements.
 - Configure a dead-letter exchange for each processing queue.
-- Use bounded retry-delay queues with message TTL and dead-letter routing; do not immediately requeue a throttled or transiently failed task.
+- Use bounded retry-delay queues with message TTL and dead-letter routing; the pre-request message with routing key `fetch.url.retry` route returns the unchanged task to `fetch.url.queue`, while Frontier schedules a new attempt after `fetch.retry_requested`.
 - Set a bounded prefetch value so one worker does not claim an unlimited number of messages.
 
 ## Reliable Event Delivery
@@ -453,7 +459,7 @@ Build the source of truth for URL scheduling.
 4. Add the unique URL constraint and tests for duplicate links and cyclic graphs.
 5. Write a `fetch.url` outbox event in the same transaction as every admitted URL.
 6. Add the outbox publisher with RabbitMQ publisher confirms.
-7. Consume `fetch.started`, `page.processed`, and `page.failed` idempotently.
+7. Consume `fetch.started`, `page.fetched`, `fetch.retry_requested`, `page.processed`, and `page.failed` idempotently. `page.fetched` releases the fetch lease and enters `downloaded`. Only Frontier allocates a new `fetch_attempt` and schedules the next primary `fetch.url` event.
 8. Implement expired-lease recovery through the retry-delay queue.
 9. Add depth, page-count, and per-origin limits.
 10. Expose internal crawl creation and status endpoints.
@@ -466,9 +472,9 @@ Build the scalable and safe HTTP worker.
 2. Create a reusable aiohttp session and configured connection pool.
 3. Implement URL/IP validation, response size limits, MIME validation, and timeouts.
 4. Add manual redirect handling and validate each target.
-5. Add retry classification, exponential backoff, jitter, and `Retry-After` handling.
+5. Add retry classification, exponential backoff, jitter, and `Retry-After` handling to calculate `suggested_delay_seconds` for `fetch.retry_requested` after a retryable fetch-execution failure. Route pre-request infrastructure failures through `fetch.url.retry` without changing `fetch_attempt`.
 6. Add Redis-backed per-origin rate limiting and circuit breaking with an atomic Lua script.
-7. Publish `fetch.started` before processing the task; upload accepted HTML to object storage with a deterministic key and publish `page.fetched` with `content_ref` on success, or publish `page.failed` for final failures.
+7. Acquire Redis origin permission, then publish `fetch.started` immediately before fetch execution; upload accepted HTML to object storage with a deterministic key and publish `page.fetched` with `content_ref` on success, `fetch.retry_requested` for retryable fetch-execution failures, or `page.failed` for final failures. Route temporary pre-request infrastructure failures through `fetch.url.retry` with the unchanged message. Never allocate a new attempt or publish to the primary `fetch.url` route.
 8. Add tests with a local HTTP fixture for success, 404, timeout, 429, redirect, oversized response, blocked private IP, object-upload failure, and multiple replicas sharing one origin policy.
 
 ### 4. Content Service
@@ -551,7 +557,9 @@ All runtime configuration is supplied through environment variables. Secrets are
 - Raw HTML is stored outside RabbitMQ and Content reads it through `content_ref`.
 - Indexed text is searchable through the API.
 - Elasticsearch can be rebuilt from the authoritative content data.
-- Transient HTTP failures use bounded retry with exponential backoff and jitter.
+- Transient fetch-execution failures use bounded retry with exponential backoff and jitter.
+- Temporary pre-request infrastructure failures are retried through `fetch.url.retry` without changing `fetch_attempt`.
+- Retryable fetch-execution failures produce `fetch.retry_requested`, and only Frontier allocates the next `fetch_attempt` and publishes the next primary `fetch.url` event.
 - Per-origin rate limits and circuit breakers apply across Fetcher replicas.
 - Private and internal network targets are rejected before a fetch is attempted.
 - Failed messages are visible in a dead-letter queue instead of being retried indefinitely.
