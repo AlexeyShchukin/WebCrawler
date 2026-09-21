@@ -310,7 +310,7 @@ Fetcher calculates a suggested retry delay only after a retryable fetch-executio
 
 ### Internal service APIs
 
-Frontier exposes `POST /internal/crawls` and `GET /internal/crawls/{crawl_id}`. Content exposes `GET /internal/search` and `GET /internal/pages/{page_id}`. These endpoints are reachable only on the internal network; the API Service validates the public request, forwards it, and returns the response. Neither API request handler queries a service-owned database or Elasticsearch directly.
+Frontier exposes `POST /internal/crawls` and `GET /internal/crawls/{crawl_id}`. Content exposes `GET /internal/search` and `GET /internal/pages/{page_id}`. These endpoints are reachable only on their dedicated internal Docker networks; the API Service validates the public request, forwards it, and returns the response. Neither API request handler queries a service-owned database or Elasticsearch directly. Docker Compose also separates Frontier/PostgreSQL, Content/PostgreSQL, RabbitMQ, object storage, Fetcher/Redis, and Content/Elasticsearch onto dedicated internal networks. Fetcher alone joins a non-internal egress network for public website requests.
 
 ### Content controls
 
