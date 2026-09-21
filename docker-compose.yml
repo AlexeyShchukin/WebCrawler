@@ -38,6 +38,25 @@ services:
     networks:
       - crawler_internal
 
+  rabbitmq-init:
+    image: rabbitmq:4-management
+    restart: "no"
+    environment:
+      RABBITMQADMIN_TARGET_HOST: rabbitmq
+      RABBITMQADMIN_TARGET_PORT: "15672"
+      RABBITMQADMIN_USERNAME: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+      RABBITMQADMIN_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+      RABBITMQADMIN_NON_INTERACTIVE_MODE: "true"
+    volumes:
+      - ./infrastructure/rabbitmq/bootstrap.sh:/usr/local/bin/rabbitmq-bootstrap:ro
+      - ./infrastructure/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/rabbitmq-bootstrap"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - crawler_internal
+
   redis:
     image: redis:8-alpine
     command:
@@ -124,7 +143,7 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
+        condition: service_completed_successfully
     networks:
       - crawler_internal
 
@@ -142,7 +161,7 @@ services:
       OBJECT_STORAGE_BUCKET: crawler-raw-content
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -167,7 +186,7 @@ services:
       postgres:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticsearch:

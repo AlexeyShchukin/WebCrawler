@@ -1,0 +1,380 @@
+{
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "crawler.topic",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "crawler.retry",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "crawler.dlx",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "fetch.url.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "fetch.url"
+      }
+    },
+    {
+      "name": "fetch.started.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "fetch.started"
+      }
+    },
+    {
+      "name": "fetch.retry_requested.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "fetch.retry_requested"
+      }
+    },
+    {
+      "name": "page.fetched.content.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "page.fetched.content"
+      }
+    },
+    {
+      "name": "page.fetched.frontier.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "page.fetched.frontier"
+      }
+    },
+    {
+      "name": "links.extracted.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "links.extracted"
+      }
+    },
+    {
+      "name": "page.processed.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "page.processed"
+      }
+    },
+    {
+      "name": "page.failed.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "crawler.dlx",
+        "x-dead-letter-routing-key": "page.failed"
+      }
+    },
+    {
+      "name": "fetch.url.retry.5s.delay.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "crawler.topic",
+        "x-dead-letter-routing-key": "fetch.url"
+      }
+    },
+    {
+      "name": "fetch.url.retry.30s.delay.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 30000,
+        "x-dead-letter-exchange": "crawler.topic",
+        "x-dead-letter-routing-key": "fetch.url"
+      }
+    },
+    {
+      "name": "fetch.url.retry.2m.delay.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 120000,
+        "x-dead-letter-exchange": "crawler.topic",
+        "x-dead-letter-routing-key": "fetch.url"
+      }
+    },
+    {
+      "name": "fetch.url.retry.10m.delay.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 600000,
+        "x-dead-letter-exchange": "crawler.topic",
+        "x-dead-letter-routing-key": "fetch.url"
+      }
+    },
+    {
+      "name": "fetch.url.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "fetch.started.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "fetch.retry_requested.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "page.fetched.content.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "page.fetched.frontier.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "links.extracted.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "page.processed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "page.failed.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "fetch.url.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.url",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "fetch.started.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.started",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "fetch.retry_requested.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.retry_requested",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "page.fetched.content.queue",
+      "destination_type": "queue",
+      "routing_key": "page.fetched",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "page.fetched.frontier.queue",
+      "destination_type": "queue",
+      "routing_key": "page.fetched",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "links.extracted.queue",
+      "destination_type": "queue",
+      "routing_key": "links.extracted",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "page.processed.queue",
+      "destination_type": "queue",
+      "routing_key": "page.processed",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.topic",
+      "vhost": "/",
+      "destination": "page.failed.queue",
+      "destination_type": "queue",
+      "routing_key": "page.failed",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.retry",
+      "vhost": "/",
+      "destination": "fetch.url.retry.5s.delay.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.url.retry.5s",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.retry",
+      "vhost": "/",
+      "destination": "fetch.url.retry.30s.delay.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.url.retry.30s",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.retry",
+      "vhost": "/",
+      "destination": "fetch.url.retry.2m.delay.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.url.retry.2m",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.retry",
+      "vhost": "/",
+      "destination": "fetch.url.retry.10m.delay.queue",
+      "destination_type": "queue",
+      "routing_key": "fetch.url.retry.10m",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "fetch.url.dlq",
+      "destination_type": "queue",
+      "routing_key": "fetch.url",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "fetch.started.dlq",
+      "destination_type": "queue",
+      "routing_key": "fetch.started",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "fetch.retry_requested.dlq",
+      "destination_type": "queue",
+      "routing_key": "fetch.retry_requested",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "page.fetched.content.dlq",
+      "destination_type": "queue",
+      "routing_key": "page.fetched.content",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "page.fetched.frontier.dlq",
+      "destination_type": "queue",
+      "routing_key": "page.fetched.frontier",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "links.extracted.dlq",
+      "destination_type": "queue",
+      "routing_key": "links.extracted",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "page.processed.dlq",
+      "destination_type": "queue",
+      "routing_key": "page.processed",
+      "arguments": {}
+    },
+    {
+      "source": "crawler.dlx",
+      "vhost": "/",
+      "destination": "page.failed.dlq",
+      "destination_type": "queue",
+      "routing_key": "page.failed",
+      "arguments": {}
+    }
+  ]
+}
