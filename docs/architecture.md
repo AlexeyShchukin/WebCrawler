@@ -275,7 +275,7 @@ Object storage holds raw HTML snapshots accepted by Fetcher. It is infrastructur
 
 Fetcher uploads an accepted response before publishing `page.fetched`. Its deterministic object key is `crawls/{crawl_id}/urls/{url_id}/fetches/{fetch_attempt}.html`. Including `fetch_attempt` prevents a late result from an older attempt from overwriting a newer response. `content_ref` is that opaque key; it never exposes the storage endpoint, bucket credentials, or a presigned URL in RabbitMQ.
 
-Fetcher and Content use `aioboto3` with an async S3 client. The client receives its endpoint and credentials through environment variables, uses Signature Version 4, and forces `addressing_style="path"`. Path-style access works with MinIO's default configuration; virtual-host style would require `MINIO_DOMAIN` and matching DNS configuration. Content reads the object through this client. Transient object-storage read failures are retried according to the Content retry policy; a confirmed missing object is treated as a processing failure. Lifecycle rules remove raw snapshots after the configured retention period; PostgreSQL remains the authoritative source for processed page data.
+Fetcher and Content use `aioboto3` with an async S3 client. The client receives its endpoint and credentials through environment variables, uses Signature Version 4, and forces `addressing_style="path"`. Path-style access works with MinIO's default configuration; virtual-host style would require `MINIO_DOMAIN` and matching DNS configuration. Content reads these objects through the same S3-compatible client using the opaque `content_ref` from the `page.fetched` event, which it persists as part of its resumable processing state. The `minio-init` job creates the private `crawler-raw-content` bucket and reconciles its lifecycle policy to expire raw snapshots after `RAW_CONTENT_RETENTION_DAYS` (30 days by default). Transient object-storage read failures are retried according to the Content retry policy; a confirmed missing object is treated as a processing failure. PostgreSQL remains the authoritative source for processed page data, while Elasticsearch is a rebuildable search projection. Raw HTML is kept in object storage for reprocessing and debugging and is never placed directly in RabbitMQ messages.
 
 ## Reliability and Safety Controls
 
@@ -533,6 +533,7 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `OBJECT_STORAGE_ACCESS_KEY` | Fetcher, Content | Object-storage access key |
 | `OBJECT_STORAGE_SECRET_KEY` | Fetcher, Content | Object-storage secret key |
 | `OBJECT_STORAGE_BUCKET` | Fetcher, Content | Private bucket for raw fetched HTML |
+| `RAW_CONTENT_RETENTION_DAYS` | MinIO init job | Raw HTML retention period; default `30` days |
 | `ADMIN_API_KEY` | API | Protect crawler write operations |
 | `FETCH_CONCURRENCY` | Fetcher | Maximum parallel HTTP requests per replica |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | Fetcher | Connection timeout |

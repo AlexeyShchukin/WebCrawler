@@ -96,6 +96,24 @@ services:
     networks:
       - crawler_internal
 
+  minio-init:
+    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    restart: "no"
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
+      RAW_CONTENT_RETENTION_DAYS: ${RAW_CONTENT_RETENTION_DAYS:-30}
+    volumes:
+      - ./infrastructure/minio/bootstrap.sh:/usr/local/bin/minio-bootstrap:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/minio-bootstrap"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - crawler_internal
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     environment:
@@ -158,14 +176,14 @@ services:
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-      OBJECT_STORAGE_BUCKET: crawler-raw-content
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
     depends_on:
       rabbitmq:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     networks:
       - crawler_internal
 
@@ -181,14 +199,14 @@ services:
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-      OBJECT_STORAGE_BUCKET: crawler-raw-content
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_completed_successfully
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
       elasticsearch:
         condition: service_healthy
     networks:
