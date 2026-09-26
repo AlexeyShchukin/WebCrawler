@@ -18,6 +18,7 @@ services:
       timeout: 3s
       retries: 20
     networks:
+      - postgres_host
       - frontier_postgres
       - content_postgres
 
@@ -224,6 +225,7 @@ services:
       - content_elasticsearch
 
 networks:
+  postgres_host:
   api_frontier:
     internal: true
   api_content:

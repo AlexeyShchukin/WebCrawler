@@ -229,7 +229,7 @@ This database constraint protects against cycles, duplicate links on one page, a
 |---|---|
 | `crawls` | Crawl ID, state, timestamps, limits, and counters |
 | `crawl_urls` | One normalized URL per crawl, depth, status, fetch lease, and error details |
-| `links` | Directed graph edges between source and target URLs |
+| `links` | Directed graph edges between source and target URLs in the same crawl; database constraints reject cross-crawl edges |
 | `outbox_events` | Durable events waiting for RabbitMQ publisher confirmation |
 | `processed_events` | Consumed handler and event IDs; `UNIQUE (consumer_name, event_id)` enforces idempotency |
 

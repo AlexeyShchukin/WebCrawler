@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -52,6 +53,7 @@ class CrawlUrl(Base):
     __tablename__ = "crawl_urls"
     __table_args__ = (
         UniqueConstraint("crawl_id", "normalized_url", name="uq_crawl_urls_crawl_id_normalized_url"),
+        UniqueConstraint("crawl_id", "id", name="uq_crawl_urls_crawl_id_id"),
         CheckConstraint("depth >= 0", name="ck_crawl_urls_depth_nonnegative"),
         CheckConstraint("fetch_attempt >= 1", name="ck_crawl_urls_fetch_attempt_positive"),
         Index(
@@ -100,15 +102,23 @@ class Link(Base):
     """A deduplicated directed edge between two crawl URL nodes."""
 
     __tablename__ = "links"
+    __table_args__ = (
+        Index("ix_links_target_url_id", "target_url_id"),
+        ForeignKeyConstraint(
+            ["crawl_id", "source_url_id"],
+            ["crawl_urls.crawl_id", "crawl_urls.id"],
+            name="fk_links_source_url_within_crawl",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["crawl_id", "target_url_id"],
+            ["crawl_urls.crawl_id", "crawl_urls.id"],
+            name="fk_links_target_url_within_crawl",
+            ondelete="CASCADE",
+        ),
+    )
 
-    source_url_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("crawl_urls.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    target_url_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("crawl_urls.id", ondelete="CASCADE"),
-        primary_key=True,
-    )
+    crawl_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    source_url_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    target_url_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

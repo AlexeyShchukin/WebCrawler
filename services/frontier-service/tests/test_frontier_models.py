@@ -1,4 +1,4 @@
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
 
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
 from crawler_frontier.state_machine import UrlStatus
@@ -40,6 +40,51 @@ def test_frontier_models_store_the_documented_graph_and_url_statuses() -> None:
         "target_url_id",
     )
     assert set(CrawlUrl.__table__.c.status.type.enums) == {status.value for status in UrlStatus}
+
+
+def test_link_schema_restricts_both_endpoints_to_its_crawl() -> None:
+    table = Link.__table__
+
+    assert set(table.c.keys()) == {
+        "crawl_id",
+        "source_url_id",
+        "target_url_id",
+        "created_at",
+    }
+
+    foreign_keys = [constraint for constraint in table.constraints if isinstance(constraint, ForeignKeyConstraint)]
+    assert {
+        (
+            constraint.name,
+            tuple(column.name for column in constraint.columns),
+            tuple(element.target_fullname for element in constraint.elements),
+        )
+        for constraint in foreign_keys
+    } == {
+        (
+            "fk_links_source_url_within_crawl",
+            ("crawl_id", "source_url_id"),
+            ("crawl_urls.crawl_id", "crawl_urls.id"),
+        ),
+        (
+            "fk_links_target_url_within_crawl",
+            ("crawl_id", "target_url_id"),
+            ("crawl_urls.crawl_id", "crawl_urls.id"),
+        ),
+    }
+
+    crawl_url_uniques = [
+        constraint
+        for constraint in CrawlUrl.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+    ]
+    assert any(
+        constraint.name == "uq_crawl_urls_crawl_id_id"
+        and tuple(column.name for column in constraint.columns) == ("crawl_id", "id")
+        for constraint in crawl_url_uniques
+    )
+    target_lookup = _index_by_name(table, "ix_links_target_url_id")
+    assert tuple(column.name for column in target_lookup.columns) == ("target_url_id",)
 
 
 def test_scheduler_and_lease_recovery_indexes_match_their_queries() -> None:
