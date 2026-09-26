@@ -11,6 +11,7 @@ dependencies = [
     "crawler-contracts>=0.1.0",
     "fastapi>=0.115,<1",
     "pydantic>=2.10,<3",
+    "python-dotenv>=1.2,<2",
     "sqlalchemy>=2.0,<3",
     "uvicorn[standard]>=0.34,<1",
 ]

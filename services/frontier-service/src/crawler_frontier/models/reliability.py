@@ -3,7 +3,8 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, Uuid, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from crawler_frontier.models.base import Base
@@ -18,10 +19,18 @@ class OutboxEvent(Base):
     """An event committed with local state and awaiting broker confirmation."""
 
     __tablename__ = "outbox_events"
+    __table_args__ = (
+        Index(
+            "ix_outbox_events_pending",
+            "created_at",
+            "event_id",
+            postgresql_where=text("published_at IS NULL"),
+        ),
+    )
 
     event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     routing_key: Mapped[str] = mapped_column(String(128), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     publish_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
