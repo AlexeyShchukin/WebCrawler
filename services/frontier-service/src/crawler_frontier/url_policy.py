@@ -58,7 +58,7 @@ def is_allowed_url(
     """Return whether a URL has a hostname explicitly allowed for this crawl."""
     candidate_host = _hostname(normalize_url(value))
     seed_hosts = {_hostname(normalize_url(seed_url)) for seed_url in seed_urls}
-    extra_hosts = {_normalize_allowed_host(host) for host in additional_allowed_hosts}
+    extra_hosts = {normalize_allowed_host(host) for host in additional_allowed_hosts}
     return candidate_host in seed_hosts | extra_hosts
 
 
@@ -69,7 +69,7 @@ def _hostname(value: str) -> str:
     return hostname.lower()
 
 
-def _normalize_allowed_host(value: str) -> str:
+def normalize_allowed_host(value: str) -> str:
     if not isinstance(value, str) or not value:
         raise UrlValidationError("Allowed host must be a non-empty hostname")
     if any(character.isspace() or ord(character) < 32 for character in value):

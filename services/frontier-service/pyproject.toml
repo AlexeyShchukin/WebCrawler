@@ -32,3 +32,9 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "crawler_frontier"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires the local Frontier PostgreSQL database",
+]
+addopts = "-m 'not integration'"
