@@ -27,3 +27,5 @@ WORKDIR /app/services/frontier-service
 COPY --from=builder --chown=crawler:crawler /app/services/frontier-service/.venv .venv
 
 USER crawler
+
+CMD ["uvicorn", "crawler_frontier.app:app", "--host", "0.0.0.0", "--port", "8000"]

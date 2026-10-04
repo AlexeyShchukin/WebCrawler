@@ -4,22 +4,23 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from crawler_frontier.database import create_engine, create_session_factory
 from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl, Link
 from crawler_frontier.services import CrawlService
+from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
 
 
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(database_url_from_environment(), poolclass=NullPool)
+    engine = create_engine(FrontierSettings(database_url=database_url_from_environment()))
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
 
-    yield async_sessionmaker(engine, expire_on_commit=False)
+    yield create_session_factory(engine)
     await engine.dispose()
 
 

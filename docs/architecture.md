@@ -458,14 +458,15 @@ Build the source of truth for URL scheduling.
 
 1. Add SQLAlchemy models and Alembic migrations for crawls, URLs, links, fetch leases, outbox events, and processed events.
 2. Implement URL normalization, allowed-host policy, and validation tests first.
-3. Implement crawl creation and URL admission.
-4. Add the unique URL constraint and tests for duplicate links and cyclic graphs.
-5. Write a `fetch.url` outbox event in the same transaction as every admitted URL.
-6. Add the outbox publisher with RabbitMQ publisher confirms.
-7. Consume `fetch.started`, `page.fetched`, `fetch.retry_requested`, `page.processed`, and `page.failed` idempotently. `page.fetched` releases the fetch lease and enters `downloaded`. Only Frontier allocates a new `fetch_attempt` and schedules the next primary `fetch.url` event.
-8. Implement expired-lease recovery through the retry-delay queue.
-9. Add depth, page-count, and per-origin limits.
-10. Expose internal crawl creation and status endpoints.
+3. Configure Frontier runtime PostgreSQL access: require `DATABASE_URL`, create the process-owned async engine and bounded connection pool, create `async_sessionmaker` with `expire_on_commit=False`, and dispose the engine through the FastAPI lifespan. Provide one session per internal HTTP request and a PostgreSQL readiness check. Alembic continues to use the same `DATABASE_URL` independently of the running application.
+4. Implement crawl creation and URL admission.
+5. Add the unique URL constraint and tests for duplicate links and cyclic graphs.
+6. Write a `fetch.url` outbox event in the same transaction as every admitted URL.
+7. Add the outbox publisher with RabbitMQ publisher confirms.
+8. Consume `fetch.started`, `page.fetched`, `fetch.retry_requested`, `page.processed`, and `page.failed` idempotently. `page.fetched` releases the fetch lease and enters `downloaded`. Only Frontier allocates a new `fetch_attempt` and schedules the next primary `fetch.url` event.
+9. Implement expired-lease recovery through the retry-delay queue.
+10. Add depth, page-count, and per-origin limits.
+11. Expose internal crawl creation and status endpoints.
 
 ### 3. Fetcher Service
 
@@ -526,6 +527,9 @@ All runtime configuration is supplied through environment variables. Secrets are
 | Variable | Used by | Purpose |
 |---|---|---|
 | `DATABASE_URL` | Frontier, Content | Service-specific PostgreSQL connection string |
+| `DATABASE_POOL_SIZE` | Frontier, Content | Persistent connections per service process; default `5` |
+| `DATABASE_MAX_OVERFLOW` | Frontier, Content | Temporary connections beyond the pool size; default `10` |
+| `DATABASE_POOL_TIMEOUT_SECONDS` | Frontier, Content | Maximum wait for an available database connection; default `30` |
 | `RABBITMQ_URL` | Frontier, Fetcher, Content | RabbitMQ connection string |
 | `ELASTICSEARCH_URL` | Content | Elasticsearch connection string |
 | `REDIS_URL` | Fetcher | Shared origin policy state |
