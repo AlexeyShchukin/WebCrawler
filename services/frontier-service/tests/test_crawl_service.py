@@ -3,12 +3,13 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from crawler_contracts import FetchUrlEvent
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from crawler_frontier.database import create_engine, create_session_factory
 from crawler_frontier.migration_settings import database_url_from_environment
-from crawler_frontier.models import Crawl, CrawlUrl, Link
+from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
 from crawler_frontier.services import CrawlService
 from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
@@ -181,6 +182,71 @@ async def test_admission_stores_a_cycle_once_without_duplicate_nodes_or_edges(
         assert {(link.source_url_id, link.target_url_id) for link in links} == {
             (first.id, second.url_id),
             (second.url_id, first.id),
+        }
+    finally:
+        await _remove_crawl(session_factory, created.crawl_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admission_writes_one_fetch_url_outbox_event_per_new_queued_url(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    host = f"outbox-{uuid4().hex}.example.test"
+    seed_url = f"https://{host}/start"
+    queued_url = f"https://{host}/about"
+
+    async with session_factory() as create_session:
+        created = await CrawlService(create_session).create_crawl([seed_url])
+
+    try:
+        async with session_factory() as read_session:
+            seed = await read_session.scalar(
+                select(CrawlUrl).where(
+                    CrawlUrl.crawl_id == created.crawl_id,
+                    CrawlUrl.normalized_url == seed_url,
+                )
+            )
+            assert seed is not None
+
+        async with session_factory() as write_session:
+            service = CrawlService(write_session)
+            queued = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=seed.id,
+                url=queued_url,
+                depth=1,
+            )
+            repeated = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=seed.id,
+                url=queued_url,
+                depth=1,
+            )
+            skipped = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=seed.id,
+                url="https://outside.example.test/page",
+                depth=1,
+            )
+
+            outbox_events = [
+                outbox_event
+                for outbox_event in await write_session.scalars(select(OutboxEvent))
+                if outbox_event.payload["crawl_id"] == str(created.crawl_id)
+            ]
+
+        assert queued.created is True
+        assert repeated.created is False
+        assert skipped.status is UrlStatus.SKIPPED
+        assert len(outbox_events) == 2
+        assert {event.routing_key for event in outbox_events} == {"fetch.url"}
+
+        fetch_events = [FetchUrlEvent.model_validate(event.payload) for event in outbox_events]
+        assert {event.event_id for event in fetch_events} == {event.event_id for event in outbox_events}
+        assert {(str(event.url), event.url_id, event.depth, event.fetch_attempt) for event in fetch_events} == {
+            (seed_url, seed.id, 0, 1),
+            (queued_url, queued.url_id, 1, 1),
         }
     finally:
         await _remove_crawl(session_factory, created.crawl_id)

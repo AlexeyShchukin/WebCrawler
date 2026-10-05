@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from crawler_contracts import FetchUrlEvent
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crawler_frontier.models import Crawl, CrawlUrl, Link
+from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
 from crawler_frontier.state_machine import UrlStatus
 from crawler_frontier.url_policy import (
     UrlValidationError,
@@ -153,6 +154,17 @@ class CrawlService:
             url_id, stored_status = inserted
             created = True
 
+        if created and stored_status is UrlStatus.QUEUED:
+            self._session.add(
+                _fetch_url_outbox_event(
+                    crawl_id=crawl_id,
+                    url_id=url_id,
+                    fetch_attempt=1,
+                    url=normalized_url,
+                    depth=depth,
+                )
+            )
+
         if source_url_id is not None:
             await self._session.execute(
                 insert(Link)
@@ -187,3 +199,26 @@ def _hostname(normalized_url: str) -> str:
     if hostname is None:
         raise UrlValidationError("URL must include a hostname")
     return hostname.lower()
+
+
+def _fetch_url_outbox_event(
+        *,
+        crawl_id: UUID,
+        url_id: UUID,
+        fetch_attempt: int,
+        url: str,
+        depth: int,
+) -> OutboxEvent:
+    """Build the durable event for one newly admitted queued URL."""
+    event = FetchUrlEvent(
+        crawl_id=crawl_id,
+        url_id=url_id,
+        fetch_attempt=fetch_attempt,
+        url=url,
+        depth=depth,
+    )
+    return OutboxEvent(
+        event_id=event.event_id,
+        routing_key="fetch.url",
+        payload=event.model_dump(mode="json"),
+    )
