@@ -120,3 +120,67 @@ async def test_admission_deduplicates_urls_stores_edges_and_skips_out_of_scope_u
         assert len(edges) == 2
     finally:
         await _remove_crawl(session_factory, created.crawl_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admission_stores_a_cycle_once_without_duplicate_nodes_or_edges(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    host = f"cycle-{uuid4().hex}.example.test"
+    first_url = f"https://{host}/first"
+    second_url = f"https://{host}/second"
+
+    async with session_factory() as create_session:
+        created = await CrawlService(create_session).create_crawl([first_url])
+
+    try:
+        async with session_factory() as read_session:
+            first = await read_session.scalar(
+                select(CrawlUrl).where(
+                    CrawlUrl.crawl_id == created.crawl_id,
+                    CrawlUrl.normalized_url == first_url,
+                )
+            )
+            assert first is not None
+
+        async with session_factory() as write_session:
+            service = CrawlService(write_session)
+            second = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=first.id,
+                url=second_url,
+                depth=1,
+            )
+            back_to_first = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=second.url_id,
+                url=first_url,
+                depth=2,
+            )
+            repeated_edge = await service.admit_url(
+                crawl_id=created.crawl_id,
+                source_url_id=first.id,
+                url=second_url,
+                depth=1,
+            )
+
+            urls = list(
+                await write_session.scalars(
+                    select(CrawlUrl).where(CrawlUrl.crawl_id == created.crawl_id)
+                )
+            )
+            links = list(
+                await write_session.scalars(select(Link).where(Link.crawl_id == created.crawl_id))
+            )
+
+        assert second.created is True
+        assert back_to_first.created is False
+        assert repeated_edge.created is False
+        assert {url.normalized_url for url in urls} == {first_url, second_url}
+        assert {(link.source_url_id, link.target_url_id) for link in links} == {
+            (first.id, second.url_id),
+            (second.url_id, first.id),
+        }
+    finally:
+        await _remove_crawl(session_factory, created.crawl_id)
