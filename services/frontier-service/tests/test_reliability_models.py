@@ -9,6 +9,7 @@ def test_outbox_event_schema_records_publishable_event_data() -> None:
     assert table.name == "outbox_events"
     assert set(table.c.keys()) == {
         "event_id",
+        "exchange_name",
         "routing_key",
         "payload",
         "created_at",
@@ -17,6 +18,7 @@ def test_outbox_event_schema_records_publishable_event_data() -> None:
         "last_publish_error",
     }
     assert table.c.event_id.primary_key
+    assert not table.c.exchange_name.nullable
     assert not table.c.routing_key.nullable
     assert not table.c.payload.nullable
     assert table.c.published_at.nullable

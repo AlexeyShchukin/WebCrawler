@@ -29,6 +29,7 @@ class OutboxEvent(Base):
     )
 
     event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    exchange_name: Mapped[str] = mapped_column(String(128), nullable=False, server_default=text("'crawler.topic'"))
     routing_key: Mapped[str] = mapped_column(String(128), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -29,6 +29,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 async def _create_pending_event(session_factory: async_sessionmaker[AsyncSession]) -> OutboxEvent:
     event = OutboxEvent(
         event_id=uuid4(),
+        exchange_name="crawler.topic",
         routing_key="fetch.url",
         payload={"event_id": str(uuid4())},
         created_at=datetime(1970, 1, 1, tzinfo=UTC),
@@ -59,7 +60,7 @@ async def test_publisher_marks_event_published_after_confirm(
     exchange = ConfirmingExchange()
 
     try:
-        assert await OutboxPublisher(session_factory, exchange).publish_pending_once()
+        assert await OutboxPublisher(session_factory, {"crawler.topic": exchange}).publish_pending_once()
 
         async with session_factory() as session:
             stored = await session.get(OutboxEvent, event.event_id)
@@ -85,7 +86,9 @@ async def test_publisher_records_broker_error_and_leaves_event_pending(
     event = await _create_pending_event(session_factory)
 
     try:
-        assert not await OutboxPublisher(session_factory, FailingExchange()).publish_pending_once()
+        assert not await OutboxPublisher(
+            session_factory, {"crawler.topic": FailingExchange()}
+        ).publish_pending_once()
 
         async with session_factory() as session:
             stored = await session.get(OutboxEvent, event.event_id)

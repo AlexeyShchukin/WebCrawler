@@ -18,10 +18,10 @@ class OutboxPublisher:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        exchange: AbstractExchange,
+        exchanges: dict[str, AbstractExchange],
     ) -> None:
         self._session_factory = session_factory
-        self._exchange = exchange
+        self._exchanges = exchanges
 
     async def publish_pending_once(self) -> bool:
         """Publish one pending event, returning whether RabbitMQ confirmed it."""
@@ -38,7 +38,8 @@ class OutboxPublisher:
 
             event.publish_attempts += 1
             try:
-                await self._exchange.publish(
+                exchange = self._exchanges[event.exchange_name]
+                await exchange.publish(
                     Message(
                         body=json.dumps(event.payload, separators=(",", ":")).encode(),
                         content_type="application/json",

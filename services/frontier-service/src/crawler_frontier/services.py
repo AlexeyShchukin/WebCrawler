@@ -219,6 +219,7 @@ def _fetch_url_outbox_event(
     )
     return OutboxEvent(
         event_id=event.event_id,
+        exchange_name="crawler.topic",
         routing_key="fetch.url",
         payload=event.model_dump(mode="json"),
     )

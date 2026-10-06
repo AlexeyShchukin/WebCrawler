@@ -26,10 +26,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     connection = await connect_robust(settings.rabbitmq_url)
     channel = await connection.channel(publisher_confirms=True)
-    exchange = await channel.declare_exchange("crawler.topic", ExchangeType.TOPIC, durable=True)
+    topic_exchange = await channel.declare_exchange("crawler.topic", ExchangeType.TOPIC, durable=True)
+    retry_exchange = await channel.declare_exchange("crawler.retry", ExchangeType.TOPIC, durable=True)
     stop_event = Event()
     publisher_task = create_task(
-        OutboxPublisher(app.state.session_factory, exchange).run(
+        OutboxPublisher(
+            app.state.session_factory,
+            {"crawler.topic": topic_exchange, "crawler.retry": retry_exchange},
+        ).run(
             stop_event,
             settings.outbox_poll_interval_seconds,
         )
