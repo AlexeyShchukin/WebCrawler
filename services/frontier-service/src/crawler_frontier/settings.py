@@ -10,9 +10,11 @@ class FrontierSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
     database_url: str
+    rabbitmq_url: str
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_timeout_seconds: int = 30
+    outbox_poll_interval_seconds: float = 1.0
 
     @field_validator("database_url")
     @classmethod

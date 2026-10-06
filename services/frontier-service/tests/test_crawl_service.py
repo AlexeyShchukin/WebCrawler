@@ -17,7 +17,12 @@ from crawler_frontier.state_machine import UrlStatus
 
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(FrontierSettings(database_url=database_url_from_environment()))
+    engine = create_engine(
+        FrontierSettings(
+            database_url=database_url_from_environment(),
+            rabbitmq_url="amqp://crawler:secret@localhost/",
+        )
+    )
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
 

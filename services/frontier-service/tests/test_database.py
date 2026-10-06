@@ -20,6 +20,7 @@ def test_settings_require_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://crawler:secret@postgres:5432/frontier_db")
+    monkeypatch.setenv("RABBITMQ_URL", "amqp://crawler:secret@rabbitmq/")
     monkeypatch.setenv("DATABASE_POOL_SIZE", "8")
     monkeypatch.setenv("DATABASE_MAX_OVERFLOW", "12")
     monkeypatch.setenv("DATABASE_POOL_TIMEOUT_SECONDS", "7")
@@ -37,6 +38,7 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
 async def test_database_factory_creates_a_usable_session() -> None:
     settings = FrontierSettings(
         database_url=database_url_from_environment(),
+        rabbitmq_url="amqp://crawler:secret@localhost/",
         database_pool_size=1,
         database_max_overflow=0,
     )
@@ -65,9 +67,32 @@ async def test_application_disposes_its_database_engine_on_shutdown(
             self.disposed = True
 
     engine = FakeEngine()
+    class FakeConnection:
+        async def channel(self, *, publisher_confirms: bool):
+            return self
+
+        async def declare_exchange(self, *args, **kwargs):
+            return object()
+
+        async def close(self) -> None:
+            return None
+
+    class FakePublisher:
+        def __init__(self, *args) -> None:
+            pass
+
+        async def run(self, stop_event, poll_interval_seconds: float) -> None:
+            await stop_event.wait()
+
+    async def connect(url: str) -> FakeConnection:
+        return FakeConnection()
+
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://crawler:secret@postgres:5432/frontier_db")
+    monkeypatch.setenv("RABBITMQ_URL", "amqp://crawler:secret@rabbitmq/")
     monkeypatch.setattr(application, "create_engine", lambda settings: engine)
     monkeypatch.setattr(application, "create_session_factory", lambda database_engine: object())
+    monkeypatch.setattr(application, "connect_robust", connect)
+    monkeypatch.setattr(application, "OutboxPublisher", FakePublisher)
 
     async def healthy(database_engine: FakeEngine) -> None:
         assert database_engine is engine
