@@ -208,6 +208,8 @@ def _fetch_url_outbox_event(
         fetch_attempt: int,
         url: str,
         depth: int,
+        exchange_name: str = "crawler.topic",
+        routing_key: str = "fetch.url",
 ) -> OutboxEvent:
     """Build the durable event for one newly admitted queued URL."""
     event = FetchUrlEvent(
@@ -219,7 +221,7 @@ def _fetch_url_outbox_event(
     )
     return OutboxEvent(
         event_id=event.event_id,
-        exchange_name="crawler.topic",
-        routing_key="fetch.url",
+        exchange_name=exchange_name,
+        routing_key=routing_key,
         payload=event.model_dump(mode="json"),
     )

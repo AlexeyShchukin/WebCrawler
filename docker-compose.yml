@@ -160,6 +160,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/frontier_db
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?set RABBITMQ_USER in .env}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/
+      MAX_FETCH_ATTEMPTS: ${MAX_FETCH_ATTEMPTS:-3}
+      FETCH_LEASE_SECONDS: ${FETCH_LEASE_SECONDS:-120}
+      MAX_URL_LENGTH: ${MAX_URL_LENGTH:-4096}
     depends_on:
       postgres:
         condition: service_healthy

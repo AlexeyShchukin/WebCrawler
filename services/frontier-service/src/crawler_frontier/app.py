@@ -7,12 +7,14 @@ from contextlib import asynccontextmanager
 from aio_pika import ExchangeType, connect_robust
 from fastapi import FastAPI, HTTPException, status
 
+from crawler_frontier.consumers import CONSUMERS, consumer_callback
 from crawler_frontier.database import (
     create_engine,
     create_session_factory,
     database_healthcheck,
 )
 from crawler_frontier.outbox import OutboxPublisher
+from crawler_frontier.policy import FrontierPolicy
 from crawler_frontier.settings import FrontierSettings
 
 
@@ -23,9 +25,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = create_engine(settings)
     app.state.database_engine = engine
     app.state.session_factory = create_session_factory(engine)
+    app.state.frontier_policy = FrontierPolicy(
+        max_fetch_attempts=settings.max_fetch_attempts,
+        fetch_lease_seconds=settings.fetch_lease_seconds,
+        max_url_length=settings.max_url_length,
+    )
 
     connection = await connect_robust(settings.rabbitmq_url)
     channel = await connection.channel(publisher_confirms=True)
+    await channel.set_qos(prefetch_count=10)
     topic_exchange = await channel.declare_exchange("crawler.topic", ExchangeType.TOPIC, durable=True)
     retry_exchange = await channel.declare_exchange("crawler.retry", ExchangeType.TOPIC, durable=True)
     stop_event = Event()
@@ -38,6 +46,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.outbox_poll_interval_seconds,
         )
     )
+    for queue_name, (consumer_name, event_type, handler_name) in CONSUMERS.items():
+        queue = await channel.get_queue(queue_name, ensure=False)
+        await queue.consume(
+            consumer_callback(
+                event_type,
+                consumer_name,
+                handler_name,
+                app.state.session_factory,
+                app.state.frontier_policy,
+            )
+        )
     try:
         yield
     finally:

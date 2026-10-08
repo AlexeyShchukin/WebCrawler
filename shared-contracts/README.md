@@ -21,7 +21,7 @@ The package rejects unknown fields. Consumers use `event_id` together with their
 | Model | Producer | Purpose                                                       |
 |---|---|---------------------------------------------------------------|
 | `FetchUrlEvent` | Frontier | Schedule an admitted URL for fetching                         |
-| `FetchStartedEvent` | Fetcher | Start the Frontier fetch lease                                |
+| `FetchStartedEvent` | Fetcher | Report the start of a Frontier-allocated fetch attempt       |
 | `FetchRetryRequestedEvent` | Fetcher | Ask Frontier to schedule a retry for a transient fetch-execution failure |
 | `PageFetchedEvent` | Fetcher | Deliver metadata and an object-storage reference for raw HTML |
 | `LinksExtractedEvent` | Content | Send discovered links to Frontier                             |

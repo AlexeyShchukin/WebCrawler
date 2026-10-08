@@ -33,7 +33,7 @@ def fetch_envelope() -> dict[str, object]:
     ("event_type", "payload"),
     [
         (FetchUrlEvent, {"url": "https://example.com/", "depth": 0}),
-        (FetchStartedEvent, {"lease_seconds": 60}),
+        (FetchStartedEvent, {}),
         (
             FetchRetryRequestedEvent,
             {
@@ -114,12 +114,11 @@ def test_event_rejects_non_utc_timestamp() -> None:
         )
 
 
-def test_event_rejects_unknown_fields() -> None:
-    with pytest.raises(ValidationError, match="unexpected"):
+def test_fetch_started_event_rejects_fetcher_lease_configuration() -> None:
+    with pytest.raises(ValidationError, match="lease_seconds"):
         FetchStartedEvent(
             **fetch_envelope(),
             lease_seconds=60,
-            unexpected="value",
         )
 
 

@@ -45,9 +45,7 @@ class FetchUrlEvent(CrawlerEvent):
 
 
 class FetchStartedEvent(CrawlerEvent):
-    """A Fetcher has claimed a task and Frontier should start its lease."""
-
-    lease_seconds: Annotated[int, Field(gt=0)]
+    """A Fetcher has started the Frontier-allocated fetch attempt."""
 
 
 class PageFetchedEvent(CrawlerEvent):

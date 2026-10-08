@@ -11,10 +11,15 @@ class FrontierSettings(BaseSettings):
 
     database_url: str
     rabbitmq_url: str
+
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_timeout_seconds: int = 30
     outbox_poll_interval_seconds: float = 1.0
+
+    max_fetch_attempts: int = 3
+    fetch_lease_seconds: int = 120
+    max_url_length: int = 4096
 
     @field_validator("database_url")
     @classmethod

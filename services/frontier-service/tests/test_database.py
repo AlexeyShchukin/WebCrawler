@@ -24,6 +24,9 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("DATABASE_POOL_SIZE", "8")
     monkeypatch.setenv("DATABASE_MAX_OVERFLOW", "12")
     monkeypatch.setenv("DATABASE_POOL_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("MAX_FETCH_ATTEMPTS", "4")
+    monkeypatch.setenv("FETCH_LEASE_SECONDS", "180")
+    monkeypatch.setenv("MAX_URL_LENGTH", "2048")
 
     settings = FrontierSettings()
 
@@ -31,6 +34,9 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
     assert settings.database_pool_size == 8
     assert settings.database_max_overflow == 12
     assert settings.database_pool_timeout_seconds == 7
+    assert settings.max_fetch_attempts == 4
+    assert settings.fetch_lease_seconds == 180
+    assert settings.max_url_length == 2048
 
 
 @pytest.mark.integration
@@ -71,8 +77,17 @@ async def test_application_disposes_its_database_engine_on_shutdown(
         async def channel(self, *, publisher_confirms: bool):
             return self
 
+        async def set_qos(self, *, prefetch_count: int) -> None:
+            return None
+
         async def declare_exchange(self, *args, **kwargs):
             return object()
+
+        async def get_queue(self, *args, **kwargs):
+            return self
+
+        async def consume(self, callback) -> None:
+            return None
 
         async def close(self) -> None:
             return None
@@ -89,10 +104,20 @@ async def test_application_disposes_its_database_engine_on_shutdown(
 
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://crawler:secret@postgres:5432/frontier_db")
     monkeypatch.setenv("RABBITMQ_URL", "amqp://crawler:secret@rabbitmq/")
+    monkeypatch.setenv("MAX_FETCH_ATTEMPTS", "4")
+    monkeypatch.setenv("FETCH_LEASE_SECONDS", "180")
+    monkeypatch.setenv("MAX_URL_LENGTH", "2048")
     monkeypatch.setattr(application, "create_engine", lambda settings: engine)
     monkeypatch.setattr(application, "create_session_factory", lambda database_engine: object())
     monkeypatch.setattr(application, "connect_robust", connect)
     monkeypatch.setattr(application, "OutboxPublisher", FakePublisher)
+    consumer_policies = []
+
+    def callback(event_type, consumer_name, handler_name, session_factory, policy):
+        consumer_policies.append(policy)
+        return object()
+
+    monkeypatch.setattr(application, "consumer_callback", callback)
 
     async def healthy(database_engine: FakeEngine) -> None:
         assert database_engine is engine
@@ -104,5 +129,10 @@ async def test_application_disposes_its_database_engine_on_shutdown(
 
     async with application.lifespan(app):
         assert await healthcheck() == {"status": "ok"}
+        assert app.state.frontier_policy.max_fetch_attempts == 4
+        assert app.state.frontier_policy.fetch_lease_seconds == 180
+        assert app.state.frontier_policy.max_url_length == 2048
+        assert consumer_policies
+        assert all(policy is app.state.frontier_policy for policy in consumer_policies)
 
     assert engine.disposed is True
