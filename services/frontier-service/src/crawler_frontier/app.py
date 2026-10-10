@@ -13,6 +13,7 @@ from crawler_frontier.database import (
     create_session_factory,
     database_healthcheck,
 )
+from crawler_frontier.lease_recovery import LeaseRecovery
 from crawler_frontier.outbox import OutboxPublisher
 from crawler_frontier.policy import FrontierPolicy
 from crawler_frontier.settings import FrontierSettings
@@ -46,6 +47,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.outbox_poll_interval_seconds,
         )
     )
+    lease_recovery_task = create_task(
+        LeaseRecovery(app.state.session_factory, app.state.frontier_policy).run(
+            stop_event,
+            settings.lease_recovery_poll_interval_seconds,
+        )
+    )
     for queue_name, (consumer_name, event_type, handler_name) in CONSUMERS.items():
         queue = await channel.get_queue(queue_name, ensure=False)
         await queue.consume(
@@ -62,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         stop_event.set()
         await publisher_task
+        await lease_recovery_task
         await connection.close()
         await engine.dispose()
 

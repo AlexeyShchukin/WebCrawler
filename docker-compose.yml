@@ -163,6 +163,7 @@ services:
       MAX_FETCH_ATTEMPTS: ${MAX_FETCH_ATTEMPTS:-3}
       FETCH_LEASE_SECONDS: ${FETCH_LEASE_SECONDS:-120}
       MAX_URL_LENGTH: ${MAX_URL_LENGTH:-4096}
+      LEASE_RECOVERY_POLL_INTERVAL_SECONDS: ${LEASE_RECOVERY_POLL_INTERVAL_SECONDS:-5}
     depends_on:
       postgres:
         condition: service_healthy

@@ -16,6 +16,7 @@ class FrontierSettings(BaseSettings):
     database_max_overflow: int = 10
     database_pool_timeout_seconds: int = 30
     outbox_poll_interval_seconds: float = 1.0
+    lease_recovery_poll_interval_seconds: float = 5.0
 
     max_fetch_attempts: int = 3
     fetch_lease_seconds: int = 120

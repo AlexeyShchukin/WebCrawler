@@ -27,6 +27,7 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("MAX_FETCH_ATTEMPTS", "4")
     monkeypatch.setenv("FETCH_LEASE_SECONDS", "180")
     monkeypatch.setenv("MAX_URL_LENGTH", "2048")
+    monkeypatch.setenv("LEASE_RECOVERY_POLL_INTERVAL_SECONDS", "2.5")
 
     settings = FrontierSettings()
 
@@ -37,6 +38,7 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
     assert settings.max_fetch_attempts == 4
     assert settings.fetch_lease_seconds == 180
     assert settings.max_url_length == 2048
+    assert settings.lease_recovery_poll_interval_seconds == 2.5
 
 
 @pytest.mark.integration
@@ -99,6 +101,16 @@ async def test_application_disposes_its_database_engine_on_shutdown(
         async def run(self, stop_event, poll_interval_seconds: float) -> None:
             await stop_event.wait()
 
+    recovery_policies = []
+
+    class FakeLeaseRecovery:
+        def __init__(self, session_factory, policy) -> None:
+            recovery_policies.append(policy)
+
+        async def run(self, stop_event, poll_interval_seconds: float) -> None:
+            assert poll_interval_seconds == 2.5
+            await stop_event.wait()
+
     async def connect(url: str) -> FakeConnection:
         return FakeConnection()
 
@@ -107,10 +119,12 @@ async def test_application_disposes_its_database_engine_on_shutdown(
     monkeypatch.setenv("MAX_FETCH_ATTEMPTS", "4")
     monkeypatch.setenv("FETCH_LEASE_SECONDS", "180")
     monkeypatch.setenv("MAX_URL_LENGTH", "2048")
+    monkeypatch.setenv("LEASE_RECOVERY_POLL_INTERVAL_SECONDS", "2.5")
     monkeypatch.setattr(application, "create_engine", lambda settings: engine)
     monkeypatch.setattr(application, "create_session_factory", lambda database_engine: object())
     monkeypatch.setattr(application, "connect_robust", connect)
     monkeypatch.setattr(application, "OutboxPublisher", FakePublisher)
+    monkeypatch.setattr(application, "LeaseRecovery", FakeLeaseRecovery)
     consumer_policies = []
 
     def callback(event_type, consumer_name, handler_name, session_factory, policy):
@@ -134,5 +148,6 @@ async def test_application_disposes_its_database_engine_on_shutdown(
         assert app.state.frontier_policy.max_url_length == 2048
         assert consumer_policies
         assert all(policy is app.state.frontier_policy for policy in consumer_policies)
+        assert recovery_policies == [app.state.frontier_policy]
 
     assert engine.disposed is True
