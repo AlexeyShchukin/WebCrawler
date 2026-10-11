@@ -36,6 +36,20 @@ class CreatedCrawl:
 
 
 @dataclass(frozen=True, slots=True)
+class CrawlStatus:
+    """The current derived scheduling state and URL counts for a crawl."""
+
+    crawl_id: UUID
+    url_counts: dict[UrlStatus, int]
+
+    @property
+    def state(self) -> str:
+        """Return running while Frontier still has active crawl work."""
+        active_statuses = (UrlStatus.QUEUED, UrlStatus.FETCHING, UrlStatus.DOWNLOADED)
+        return "running" if any(self.url_counts[status] for status in active_statuses) else "completed"
+
+
+@dataclass(frozen=True, slots=True)
 class UrlAdmission:
     """The outcome of admitting one normalized URL into a crawl graph."""
 
@@ -115,6 +129,21 @@ class CrawlService:
                 depth=depth,
                 source_url_id=source_url_id,
             )
+
+    async def get_crawl_status(self, *, crawl_id: UUID) -> CrawlStatus:
+        """Return a crawl's derived state and a stable count for every URL status."""
+        crawl = await self._session.get(Crawl, crawl_id)
+        if crawl is None:
+            raise CrawlNotFoundError(f"Crawl {crawl_id} does not exist")
+
+        rows = await self._session.execute(
+            select(CrawlUrl.status, func.count())
+            .where(CrawlUrl.crawl_id == crawl_id)
+            .group_by(CrawlUrl.status)
+        )
+        url_counts = {status: 0 for status in UrlStatus}
+        url_counts.update({status: count for status, count in rows})
+        return CrawlStatus(crawl_id=crawl.id, url_counts=url_counts)
 
     async def _admit_normalized_url(
             self,

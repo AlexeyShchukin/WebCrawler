@@ -3,20 +3,50 @@
 from asyncio import Event, create_task
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
+from uuid import UUID
 
 from aio_pika import ExchangeType, connect_robust
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from crawler_frontier.consumers import CONSUMERS, consumer_callback
 from crawler_frontier.database import (
     create_engine,
     create_session_factory,
     database_healthcheck,
+    get_session,
 )
 from crawler_frontier.lease_recovery import LeaseRecovery
 from crawler_frontier.outbox import OutboxPublisher
 from crawler_frontier.policy import FrontierPolicy
+from crawler_frontier.services import CrawlNotFoundError, CrawlService
 from crawler_frontier.settings import FrontierSettings
+from crawler_frontier.url_policy import UrlValidationError
+
+
+class CreateCrawlRequest(BaseModel):
+    """Input for Frontier's internal crawl-creation API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seed_urls: list[str] = Field(min_length=1)
+    additional_allowed_hosts: list[str] = Field(default_factory=list)
+
+
+class CreatedCrawlResponse(BaseModel):
+    """Response returned after Frontier has durably created a crawl."""
+
+    crawl_id: UUID
+
+
+class CrawlStatusResponse(BaseModel):
+    """The derived Frontier status exposed to the API service."""
+
+    crawl_id: UUID
+    state: str
+    url_counts: dict[str, int]
 
 
 @asynccontextmanager
@@ -91,6 +121,51 @@ def create_app() -> FastAPI:
                 detail="PostgreSQL is unavailable",
             ) from error
         return {"status": "ok"}
+
+    @app.post(
+        "/internal/crawls",
+        response_model=CreatedCrawlResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_crawl(
+        payload: CreateCrawlRequest,
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> CreatedCrawlResponse:
+        """Create a crawl and its initial fetch work inside Frontier's database."""
+        try:
+            created = await CrawlService(session, app.state.frontier_policy).create_crawl(
+                payload.seed_urls,
+                additional_allowed_hosts=payload.additional_allowed_hosts,
+            )
+        except UrlValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(error),
+            ) from error
+        return CreatedCrawlResponse(crawl_id=created.crawl_id)
+
+    @app.get("/internal/crawls/{crawl_id}", response_model=CrawlStatusResponse)
+    async def get_crawl_status(
+        crawl_id: UUID,
+        session: Annotated[AsyncSession, Depends(get_session)],
+    ) -> CrawlStatusResponse:
+        """Report a crawl's derived scheduling status without mutating it."""
+        try:
+            crawl_status = await CrawlService(
+                session, app.state.frontier_policy
+            ).get_crawl_status(crawl_id=crawl_id)
+        except CrawlNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Crawl not found",
+            ) from error
+        return CrawlStatusResponse(
+            crawl_id=crawl_status.crawl_id,
+            state=crawl_status.state,
+            url_counts={
+                url_status.value: count for url_status, count in crawl_status.url_counts.items()
+            },
+        )
 
     return app
 
