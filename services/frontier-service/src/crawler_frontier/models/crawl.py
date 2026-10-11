@@ -69,6 +69,12 @@ class CrawlUrl(Base):
             "id",
             postgresql_where=text("status = 'fetching' AND lease_until IS NOT NULL"),
         ),
+        Index(
+            "ix_crawl_urls_admitted_origin",
+            "crawl_id",
+            "origin",
+            postgresql_where=text("status <> 'skipped'"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -76,6 +82,7 @@ class CrawlUrl(Base):
         Uuid(as_uuid=True), ForeignKey("crawls.id", ondelete="CASCADE"), nullable=False
     )
     normalized_url: Mapped[str] = mapped_column(String(4096), nullable=False)
+    origin: Mapped[str] = mapped_column(String(512), nullable=False)
     depth: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[UrlStatus] = mapped_column(
         URL_STATUS_TYPE,

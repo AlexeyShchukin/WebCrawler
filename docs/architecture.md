@@ -209,7 +209,9 @@ Frontier normalizes every URL before storing it:
 
 Query parameters are preserved. The crawler does not sort, remove, or rewrite them because they can change page meaning. It does not equate `/path` and `/path/`. The original URL is retained for diagnostics; the normalized URL is used for uniqueness.
 
-Each crawl has an allowed-host policy. By default, only URLs whose normalized hostname exactly matches a seed hostname are eligible for fetching. Frontier records an out-of-scope link as a graph edge and marks its URL as `skipped`; it never creates a fetch task for it. An explicit allowlist can extend the policy when a crawl must cover several hosts.
+Each crawl has an allowed-host policy. By default, only URLs whose normalized hostname exactly matches a seed hostname are eligible for fetching. A newly discovered out-of-scope URL is not persisted and never creates a fetch task or graph edge. An explicit allowlist can extend the policy when a crawl must cover several hosts.
+
+Hostname scope, depth, crawl-size, and per-origin limits are admission limits, not only scheduling limits. A newly discovered URL rejected by one of them is not persisted as a URL node or graph edge and produces no `fetch.url` event; otherwise an unlimited number of rejected links could exhaust Frontier storage. A duplicate of an already admitted URL remains eligible for graph-edge deduplication and does not consume another limit slot.
 
 The `crawl_urls` table has a database constraint:
 
@@ -545,8 +547,9 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size; default `5 MiB`, maximum `50 MiB` |
 | `ORIGIN_REQUESTS_PER_SECOND` | Fetcher | Per-origin request rate |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |
-| `MAX_CRAWL_DEPTH` | Frontier | Maximum link depth from a seed |
-| `MAX_URLS_PER_CRAWL` | Frontier | Crawl size limit |
+| `MAX_CRAWL_DEPTH` | Frontier | Maximum URL depth from a seed (seeds are depth `0`); URLs at the limit are admitted and those beyond it are skipped; default `5` |
+| `MAX_URLS_PER_CRAWL` | Frontier | Maximum non-skipped URLs per crawl; default `10,000` |
+| `MAX_URLS_PER_ORIGIN` | Frontier | Maximum non-skipped URLs per origin in one crawl; default `1,000` |
 | `MAX_FETCH_ATTEMPTS` | Frontier | Maximum number of fetch attempts per URL; default `3` |
 | `FETCH_LEASE_SECONDS` | Frontier | Lease duration after `fetch.started`; default `120` |
 | `LEASE_RECOVERY_POLL_INTERVAL_SECONDS` | Frontier | Interval for recovering expired fetch leases; default `5` |

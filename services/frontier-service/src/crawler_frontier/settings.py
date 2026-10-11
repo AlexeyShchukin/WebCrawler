@@ -21,6 +21,9 @@ class FrontierSettings(BaseSettings):
     max_fetch_attempts: int = 3
     fetch_lease_seconds: int = 120
     max_url_length: int = 4096
+    max_crawl_depth: int = 5
+    max_urls_per_crawl: int = 10_000
+    max_urls_per_origin: int = 1_000
 
     @field_validator("database_url")
     @classmethod

@@ -56,6 +56,7 @@ async def _create_url(
         url = CrawlUrl(
             crawl_id=crawl.id,
             normalized_url=f"https://{uuid4().hex}.example.test/page",
+            origin="https://example.test",
             depth=0,
             status=status,
             fetch_attempt=fetch_attempt,

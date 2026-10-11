@@ -44,6 +44,7 @@ async def _create_fetching_url(
         url = CrawlUrl(
             crawl_id=crawl.id,
             normalized_url=f"https://{uuid4().hex}.example.test/page",
+            origin="https://example.test",
             depth=2,
             status=UrlStatus.FETCHING,
             fetch_attempt=fetch_attempt,
@@ -155,7 +156,13 @@ async def test_unexpired_lease_is_not_recovered(
 
         async with session_factory() as session:
             url = await session.get(CrawlUrl, url_id)
-            outbox_events = list(await session.scalars(select(OutboxEvent)))
+            outbox_events = list(
+                await session.scalars(
+                    select(OutboxEvent).where(
+                        OutboxEvent.payload["crawl_id"].as_string() == str(crawl_id)
+                    )
+                )
+            )
 
         assert url is not None
         assert url.status is UrlStatus.FETCHING

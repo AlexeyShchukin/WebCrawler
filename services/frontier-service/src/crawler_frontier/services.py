@@ -6,11 +6,12 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from crawler_contracts import FetchUrlEvent
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
+from crawler_frontier.policy import FrontierPolicy
 from crawler_frontier.state_machine import UrlStatus
 from crawler_frontier.url_policy import (
     UrlValidationError,
@@ -38,7 +39,7 @@ class CreatedCrawl:
 class UrlAdmission:
     """The outcome of admitting one normalized URL into a crawl graph."""
 
-    url_id: UUID
+    url_id: UUID | None
     normalized_url: str
     status: UrlStatus
     created: bool
@@ -47,8 +48,9 @@ class UrlAdmission:
 class CrawlService:
     """Create crawls and atomically admit URLs and graph edges into Frontier."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, policy: FrontierPolicy) -> None:
         self._session = session
+        self._policy = policy
 
     async def create_crawl(
             self,
@@ -62,6 +64,7 @@ class CrawlService:
             raise UrlValidationError("A crawl requires at least one seed URL")
 
         allowed_hosts = _allowed_hosts(normalized_seed_urls, additional_allowed_hosts)
+        allowed_host_set = frozenset(allowed_hosts)
 
         async with self._session.begin():
             crawl = Crawl(seed_urls=normalized_seed_urls, allowed_hosts=allowed_hosts)
@@ -71,7 +74,7 @@ class CrawlService:
             for seed_url in normalized_seed_urls:
                 await self._admit_normalized_url(
                     crawl_id=crawl.id,
-                    allowed_hosts=allowed_hosts,
+                    allowed_hosts=allowed_host_set,
                     normalized_url=seed_url,
                     depth=0,
                     source_url_id=None,
@@ -93,7 +96,9 @@ class CrawlService:
         normalized_url = normalize_url(url)
 
         async with self._session.begin():
-            crawl = await self._session.get(Crawl, crawl_id)
+            crawl = await self._session.scalar(
+                select(Crawl).where(Crawl.id == crawl_id).with_for_update()
+            )
             if crawl is None:
                 raise CrawlNotFoundError(f"Crawl {crawl_id} does not exist")
 
@@ -105,7 +110,7 @@ class CrawlService:
 
             return await self._admit_normalized_url(
                 crawl_id=crawl_id,
-                allowed_hosts=crawl.allowed_hosts,
+                allowed_hosts=frozenset(crawl.allowed_hosts),
                 normalized_url=normalized_url,
                 depth=depth,
                 source_url_id=source_url_id,
@@ -115,23 +120,49 @@ class CrawlService:
             self,
             *,
             crawl_id: UUID,
-            allowed_hosts: list[str],
+            allowed_hosts: frozenset[str],
             normalized_url: str,
             depth: int,
             source_url_id: UUID | None,
     ) -> UrlAdmission:
-        status = (
-            UrlStatus.QUEUED
-            if _hostname(normalized_url) in set(allowed_hosts)
-            else UrlStatus.SKIPPED
+        existing = await self._session.scalar(
+            select(CrawlUrl).where(
+                CrawlUrl.crawl_id == crawl_id,
+                CrawlUrl.normalized_url == normalized_url,
+            )
         )
+        if existing is not None:
+            if source_url_id is not None:
+                await self._store_link(crawl_id, source_url_id, existing.id)
+            return UrlAdmission(
+                url_id=existing.id,
+                normalized_url=existing.normalized_url,
+                status=existing.status,
+                created=False,
+            )
+
+        origin = _origin(normalized_url)
+        if (
+            _hostname(normalized_url) not in allowed_hosts
+            or depth > self._policy.max_crawl_depth
+            or await self._admitted_url_count(crawl_id) >= self._policy.max_urls_per_crawl
+            or await self._admitted_origin_url_count(crawl_id, origin) >= self._policy.max_urls_per_origin
+        ):
+            return UrlAdmission(
+                url_id=None,
+                normalized_url=normalized_url,
+                status=UrlStatus.SKIPPED,
+                created=False,
+            )
+
         statement = (
             insert(CrawlUrl)
             .values(
                 crawl_id=crawl_id,
                 normalized_url=normalized_url,
+                origin=origin,
                 depth=depth,
-                status=status,
+                status=UrlStatus.QUEUED,
                 fetch_attempt=1,
             )
             .on_conflict_do_nothing(index_elements=["crawl_id", "normalized_url"])
@@ -140,19 +171,17 @@ class CrawlService:
         inserted = (await self._session.execute(statement)).one_or_none()
 
         if inserted is None:
-            existing = (
-                await self._session.execute(
-                    select(CrawlUrl.id, CrawlUrl.status).where(
-                        CrawlUrl.crawl_id == crawl_id,
-                        CrawlUrl.normalized_url == normalized_url,
-                    )
+            existing = await self._session.scalar(
+                select(CrawlUrl).where(
+                    CrawlUrl.crawl_id == crawl_id,
+                    CrawlUrl.normalized_url == normalized_url,
                 )
-            ).one()
-            url_id, stored_status = existing
-            created = False
+            )
+            if existing is None:
+                raise RuntimeError("A conflicting crawl URL disappeared during admission")
+            url_id, stored_status, created = existing.id, existing.status, False
         else:
-            url_id, stored_status = inserted
-            created = True
+            url_id, stored_status, created = inserted.id, inserted.status, True
 
         if created and stored_status is UrlStatus.QUEUED:
             self._session.add(
@@ -166,21 +195,42 @@ class CrawlService:
             )
 
         if source_url_id is not None:
-            await self._session.execute(
-                insert(Link)
-                .values(
-                    crawl_id=crawl_id,
-                    source_url_id=source_url_id,
-                    target_url_id=url_id,
-                )
-                .on_conflict_do_nothing(index_elements=["source_url_id", "target_url_id"])
-            )
+            await self._store_link(crawl_id, source_url_id, url_id)
 
         return UrlAdmission(
             url_id=url_id,
             normalized_url=normalized_url,
             status=stored_status,
             created=created,
+        )
+
+    async def _admitted_url_count(self, crawl_id: UUID) -> int:
+        return await self._session.scalar(
+            select(func.count())
+            .select_from(CrawlUrl)
+            .where(CrawlUrl.crawl_id == crawl_id, CrawlUrl.status != UrlStatus.SKIPPED)
+        ) or 0
+
+    async def _admitted_origin_url_count(self, crawl_id: UUID, origin: str) -> int:
+        return await self._session.scalar(
+            select(func.count())
+            .select_from(CrawlUrl)
+            .where(
+                CrawlUrl.crawl_id == crawl_id,
+                CrawlUrl.origin == origin,
+                CrawlUrl.status != UrlStatus.SKIPPED,
+            )
+        ) or 0
+
+    async def _store_link(self, crawl_id: UUID, source_url_id: UUID, target_url_id: UUID) -> None:
+        await self._session.execute(
+            insert(Link)
+            .values(
+                crawl_id=crawl_id,
+                source_url_id=source_url_id,
+                target_url_id=target_url_id,
+            )
+            .on_conflict_do_nothing(index_elements=["source_url_id", "target_url_id"])
         )
 
 
@@ -199,6 +249,13 @@ def _hostname(normalized_url: str) -> str:
     if hostname is None:
         raise UrlValidationError("URL must include a hostname")
     return hostname.lower()
+
+
+def _origin(normalized_url: str) -> str:
+    parts = urlsplit(normalized_url)
+    if not parts.scheme or not parts.netloc:
+        raise UrlValidationError("URL must include a scheme and hostname")
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 def _fetch_url_outbox_event(

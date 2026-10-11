@@ -19,6 +19,9 @@ def test_policy_uses_bounded_defaults() -> None:
     assert policy.max_fetch_attempts == 3
     assert policy.fetch_lease_seconds == 120
     assert policy.max_url_length == 4_096
+    assert policy.max_crawl_depth == 5
+    assert policy.max_urls_per_crawl == 10_000
+    assert policy.max_urls_per_origin == 1_000
 
 
 def test_policy_rejects_invalid_retry_limit() -> None:

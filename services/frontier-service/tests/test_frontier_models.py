@@ -15,6 +15,7 @@ def test_crawl_url_schema_enforces_one_normalized_url_per_crawl() -> None:
         "id",
         "crawl_id",
         "normalized_url",
+        "origin",
         "depth",
         "status",
         "fetch_attempt",
@@ -98,6 +99,10 @@ def test_scheduler_and_lease_recovery_indexes_match_their_queries() -> None:
         str(expired_lease.dialect_options["postgresql"]["where"])
         == "status = 'fetching' AND lease_until IS NOT NULL"
     )
+
+    admitted_origin = _index_by_name(CrawlUrl.__table__, "ix_crawl_urls_admitted_origin")
+    assert tuple(column.name for column in admitted_origin.columns) == ("crawl_id", "origin")
+    assert str(admitted_origin.dialect_options["postgresql"]["where"]) == "status <> 'skipped'"
 
 
 def test_outbox_pending_index_matches_the_delivery_query() -> None:

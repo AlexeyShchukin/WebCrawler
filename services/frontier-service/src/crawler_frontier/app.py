@@ -30,6 +30,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_fetch_attempts=settings.max_fetch_attempts,
         fetch_lease_seconds=settings.fetch_lease_seconds,
         max_url_length=settings.max_url_length,
+        max_crawl_depth=settings.max_crawl_depth,
+        max_urls_per_crawl=settings.max_urls_per_crawl,
+        max_urls_per_origin=settings.max_urls_per_origin,
     )
 
     connection = await connect_robust(settings.rabbitmq_url)
