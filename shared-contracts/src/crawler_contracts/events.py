@@ -1,8 +1,9 @@
 """Versioned Pydantic contracts for RabbitMQ crawler events."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Self
 from uuid import UUID, uuid4
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
@@ -11,6 +12,15 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 def utc_now() -> datetime:
     """Return the current timezone-aware UTC timestamp."""
     return datetime.now(UTC)
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Incoming event JSON repeats field: {key}")
+        result[key] = value
+    return result
 
 
 class CrawlerEvent(BaseModel):
@@ -23,6 +33,22 @@ class CrawlerEvent(BaseModel):
     url_id: UUID
     fetch_attempt: Annotated[int, Field(ge=1)]
     created_at: datetime = Field(default_factory=utc_now)
+
+    @classmethod
+    def from_message_json(cls, data: str | bytes | bytearray) -> Self:
+        """Validate received wire data without generating envelope defaults.
+
+        Constructors retain defaults for new outgoing events. Consumers must use
+        this entry point so received identity and timestamp are always explicit.
+        """
+        payload = json.loads(data, object_pairs_hook=_unique_json_object)
+        if not isinstance(payload, dict):
+            raise TypeError("Incoming event JSON must be an object")
+        missing = {"event_id", "created_at"} - payload.keys()
+        if missing:
+            raise ValueError(f"Incoming event requires fields: {', '.join(sorted(missing))}")
+        # Keep Pydantic's JSON-mode validation/coercion for correctly formed data.
+        return cls.model_validate_json(data)
 
     @field_validator("created_at")
     @classmethod

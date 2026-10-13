@@ -1,6 +1,6 @@
 """Runtime configuration for the Frontier service."""
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,11 +12,11 @@ class FrontierSettings(BaseSettings):
     database_url: str
     rabbitmq_url: str
 
-    database_pool_size: int = 5
-    database_max_overflow: int = 10
+    database_pool_size: int = Field(default=5, gt=0)
+    database_max_overflow: int = Field(default=10, ge=0)
     database_pool_timeout_seconds: int = 30
-    outbox_poll_interval_seconds: float = 1.0
-    lease_recovery_poll_interval_seconds: float = 5.0
+    outbox_poll_interval_seconds: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    lease_recovery_poll_interval_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
 
     max_fetch_attempts: int = 3
     fetch_lease_seconds: int = 120

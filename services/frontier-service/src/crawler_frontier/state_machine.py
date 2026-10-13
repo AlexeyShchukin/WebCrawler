@@ -20,7 +20,9 @@ class InvalidStateTransition(ValueError):
 
 
 _ALLOWED_TRANSITIONS: dict[UrlStatus, frozenset[UrlStatus]] = {
-    UrlStatus.QUEUED: frozenset({UrlStatus.FETCHING, UrlStatus.FAILED, UrlStatus.SKIPPED}),
+    UrlStatus.QUEUED: frozenset(
+        {UrlStatus.FETCHING, UrlStatus.DOWNLOADED, UrlStatus.FETCHED, UrlStatus.FAILED, UrlStatus.SKIPPED}
+    ),
     UrlStatus.FETCHING: frozenset(
         {UrlStatus.QUEUED, UrlStatus.DOWNLOADED, UrlStatus.FETCHED, UrlStatus.FAILED}
     ),
