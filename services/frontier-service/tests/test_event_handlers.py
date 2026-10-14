@@ -1,12 +1,10 @@
 """Integration tests for Frontier's idempotent pipeline-event consumers."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from crawler_contracts import (
     FailureCategory,
     FailureStage,
@@ -21,25 +19,10 @@ from crawler_contracts import (
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.database import create_engine, create_session_factory
 from crawler_frontier.event_handlers import FrontierEventHandler
-from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl, OutboxEvent, ProcessedEvent
 from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(
-        FrontierSettings(
-            database_url=database_url_from_environment(),
-            rabbitmq_url="amqp://crawler:secret@localhost/",
-        )
-    )
-    yield create_session_factory(engine)
-    await engine.dispose()
 
 
 async def _create_url(
@@ -166,7 +149,7 @@ async def test_page_processed_accepts_fetched_result_before_fetched_delivery(
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", [FailureStage.FETCH, FailureStage.CONTENT])
-async def test_page_failed_does_not_fail_a_queued_attempt(
+async def test_page_failed_finishes_current_queued_attempt_without_started(
     session_factory: async_sessionmaker[AsyncSession],
     stage: FailureStage,
 ) -> None:
@@ -177,7 +160,7 @@ async def test_page_failed_does_not_fail_a_queued_attempt(
         fetch_attempt=1,
         stage=stage,
         category=FailureCategory.TIMEOUT,
-        detail="late failure from an older execution",
+        detail="failure of the allocated current execution",
     )
 
     try:
@@ -188,8 +171,9 @@ async def test_page_failed_does_not_fail_a_queued_attempt(
             url = await session.get(CrawlUrl, url_id)
 
         assert url is not None
-        assert url.status is UrlStatus.QUEUED
-        assert url.last_error_category is None
+        assert url.status is UrlStatus.FAILED
+        assert url.lease_until is None
+        assert url.last_error_category == "timeout"
     finally:
         await _remove_crawl(session_factory, crawl_id)
 
@@ -263,3 +247,42 @@ async def test_concurrent_duplicate_delivery_is_acknowledgeable_without_unique_c
         assert len(processed) == 1
     finally:
         await _remove_crawl(session_factory, crawl_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity", ["older", "future", "unknown", "other_crawl"])
+async def test_invalid_attempt_or_identity_never_changes_state_or_schedules_work(session_factory, identity):
+    from crawler_frontier.event_handlers import EventIdentityError
+
+    crawl_id, url_id = await _create_url(session_factory, status=UrlStatus.FETCHING, fetch_attempt=2)
+    event = PageProcessedEvent(crawl_id=(uuid4() if identity == "other_crawl" else crawl_id),
+                               url_id=(uuid4() if identity == "unknown" else url_id),
+                               fetch_attempt=(1 if identity == "older" else 3), page_id=uuid4())
+    async with session_factory() as session:
+        if identity == "older":
+            await FrontierEventHandler(session, FrontierPolicy()).handle_page_processed(event, "page.processed")
+        else:
+            with pytest.raises(EventIdentityError):
+                await FrontierEventHandler(session, FrontierPolicy()).handle_page_processed(event, "page.processed")
+    async with session_factory() as session:
+        row = await session.get(CrawlUrl, url_id)
+        assert row.status is UrlStatus.FETCHING and row.fetch_attempt == 2
+        assert list(await session.scalars(select(OutboxEvent))) == []
+        assert len(list(await session.scalars(select(ProcessedEvent)))) == (1 if identity == "older" else 0)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_retry_on_final_attempt_fails_without_outbox(session_factory):
+    crawl_id, url_id = await _create_url(session_factory, status=UrlStatus.FETCHING, fetch_attempt=3)
+    event = FetchRetryRequestedEvent(crawl_id=crawl_id, url_id=url_id, fetch_attempt=3,
+                                    category="timeout", detail="timed out", suggested_delay_seconds=30)
+    async with session_factory() as session:
+        handler = FrontierEventHandler(session, FrontierPolicy(max_fetch_attempts=3))
+        await handler.handle_fetch_retry_requested(event, "fetch.retry_requested")
+        await handler.handle_fetch_retry_requested(event, "fetch.retry_requested")
+    async with session_factory() as session:
+        row = await session.get(CrawlUrl, url_id)
+        assert row.status is UrlStatus.FAILED and row.fetch_attempt == 3 and row.lease_until is None
+        assert list(await session.scalars(select(OutboxEvent))) == []
