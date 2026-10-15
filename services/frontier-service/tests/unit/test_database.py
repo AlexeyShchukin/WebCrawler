@@ -1,13 +1,23 @@
 import asyncio
 
 import pytest
+from aio_pika.connection import Connection
 from pydantic import ValidationError
+from sqlalchemy import make_url
 
 from crawler_frontier.settings import FrontierSettings
 
 
 def test_settings_require_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    for name in (
+        "DATABASE_URL",
+        "RABBITMQ_URL",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "RABBITMQ_USER",
+        "RABBITMQ_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
     with pytest.raises(ValidationError):
         FrontierSettings()
@@ -40,6 +50,38 @@ def test_settings_read_database_pool_configuration(monkeypatch: pytest.MonkeyPat
     assert settings.max_urls_per_crawl == 500
     assert settings.max_urls_per_origin == 50
     assert settings.lease_recovery_poll_interval_seconds == 2.5
+
+
+def test_settings_build_connection_urls_from_raw_compose_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("RABBITMQ_URL", raising=False)
+    monkeypatch.setenv("POSTGRES_USER", "crawler")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "p@/#%:")
+    monkeypatch.setenv("FRONTIER_DATABASE_HOST", "postgres")
+    monkeypatch.setenv("FRONTIER_DATABASE_PORT", "5432")
+    monkeypatch.setenv("FRONTIER_DATABASE_NAME", "frontier_db")
+    monkeypatch.setenv("RABBITMQ_USER", "crawler")
+    monkeypatch.setenv("RABBITMQ_PASSWORD", "p@/#%:")
+    monkeypatch.setenv("RABBITMQ_HOST", "rabbitmq")
+    monkeypatch.setenv("RABBITMQ_PORT", "5672")
+
+    settings = FrontierSettings()
+
+    database_url = make_url(settings.database_url)
+    rabbitmq_url = Connection(settings.rabbitmq_url).url
+
+    assert (database_url.username, database_url.password, database_url.host) == (
+        "crawler",
+        "p@/#%:",
+        "postgres",
+    )
+    assert (rabbitmq_url.user, rabbitmq_url.password, rabbitmq_url.host) == (
+        "crawler",
+        "p@/#%:",
+        "rabbitmq",
+    )
 
 
 @pytest.fixture

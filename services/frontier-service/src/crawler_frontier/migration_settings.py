@@ -33,9 +33,9 @@ def database_url_from_environment(*, env_file: Path = LOCAL_ENV_FILE) -> str:
         "postgresql+asyncpg",
         username=username,
         password=password,
-        host="127.0.0.1",
-        port=5433,
-        database="frontier_db",
+        host=os.environ.get("FRONTIER_DATABASE_HOST", "127.0.0.1"),
+        port=int(os.environ.get("FRONTIER_DATABASE_PORT", "5433")),
+        database=os.environ.get("FRONTIER_DATABASE_NAME", "frontier_db"),
     ).render_as_string(hide_password=False)
 
 

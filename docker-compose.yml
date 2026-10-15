@@ -158,8 +158,15 @@ services:
       context: .
       dockerfile: services/frontier-service/Dockerfile
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:?set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/frontier_db
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:?set RABBITMQ_USER in .env}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      FRONTIER_DATABASE_HOST: postgres
+      FRONTIER_DATABASE_PORT: "5432"
+      FRONTIER_DATABASE_NAME: frontier_db
+      RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
       MAX_FETCH_ATTEMPTS: ${MAX_FETCH_ATTEMPTS:-3}
       FETCH_LEASE_SECONDS: ${FETCH_LEASE_SECONDS:-120}
       MAX_URL_LENGTH: ${MAX_URL_LENGTH:-4096}
