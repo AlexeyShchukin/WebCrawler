@@ -1,33 +1,16 @@
 """HTTP integration tests for Frontier's internal crawl endpoints."""
 
-from collections.abc import AsyncIterator
 from uuid import UUID
 
 import httpx
 import pytest
-import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from crawler_frontier.app import create_app
-from crawler_frontier.database import create_engine, create_session_factory
-from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl
 from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(
-        FrontierSettings(
-            database_url=database_url_from_environment(),
-            rabbitmq_url="amqp://crawler:secret@localhost/",
-        )
-    )
-    yield create_session_factory(engine)
-    await engine.dispose()
 
 
 @pytest.mark.integration
@@ -101,3 +84,15 @@ async def test_internal_crawl_endpoints_validate_input_and_return_not_found(
 
     assert invalid_response.status_code == 422
     assert missing_response.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["exam%ple.test", "a..test", "-invalid.test"])
+async def test_bad_hostname_returns_422_and_creates_no_crawl(session_factory, host):
+    app = create_app()
+    app.state.session_factory = session_factory
+    app.state.frontier_policy = FrontierPolicy()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://frontier") as client:
+        response = await client.post("/internal/crawls", json={"seed_urls": [f"https://{host}/"]})
+        assert response.status_code == 422

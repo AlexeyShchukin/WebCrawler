@@ -15,6 +15,7 @@ def test_crawl_url_schema_enforces_one_normalized_url_per_crawl() -> None:
         "id",
         "crawl_id",
         "normalized_url",
+        "url_digest",
         "origin",
         "depth",
         "status",
@@ -28,8 +29,8 @@ def test_crawl_url_schema_enforces_one_normalized_url_per_crawl() -> None:
 
     constraints = [constraint for constraint in table.constraints if isinstance(constraint, UniqueConstraint)]
     assert any(
-        constraint.name == "uq_crawl_urls_crawl_id_normalized_url"
-        and tuple(column.name for column in constraint.columns) == ("crawl_id", "normalized_url")
+        constraint.name == "uq_crawl_urls_crawl_id_url_digest"
+        and tuple(column.name for column in constraint.columns) == ("crawl_id", "url_digest")
         for constraint in constraints
     )
 

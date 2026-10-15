@@ -1,34 +1,18 @@
 """Integration tests for Frontier recovery of abandoned fetch leases."""
 
-from collections.abc import AsyncIterator
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from crawler_contracts import FetchUrlEvent
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.database import create_engine, create_session_factory
 from crawler_frontier.lease_recovery import LeaseRecovery
-from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl, OutboxEvent
 from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(
-        FrontierSettings(
-            database_url=database_url_from_environment(),
-            rabbitmq_url="amqp://crawler:secret@localhost/",
-        )
-    )
-    yield create_session_factory(engine)
-    await engine.dispose()
 
 
 async def _create_fetching_url(
@@ -171,3 +155,22 @@ async def test_unexpired_lease_is_not_recovered(
         assert outbox_events == []
     finally:
         await _remove_crawl(session_factory, crawl_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_two_recovery_replicas_allocate_only_one_retry(session_factory):
+    now = datetime.now(UTC)
+    crawl_id, url_id = await _create_fetching_url(session_factory, lease_until=now)
+    gate = asyncio.Barrier(2)
+
+    async def recover():
+        await gate.wait()
+        return await LeaseRecovery(session_factory, FrontierPolicy()).recover_expired_once(now=now)
+
+    assert sorted(await asyncio.wait_for(asyncio.gather(recover(), recover()), 5)) == [0, 1]
+    async with session_factory() as session:
+        row = await session.get(CrawlUrl, url_id)
+        assert row.fetch_attempt == 2 and row.status is UrlStatus.QUEUED
+        events = list(await session.scalars(select(OutboxEvent).where(OutboxEvent.payload["crawl_id"].as_string() == str(crawl_id))))
+        assert len(events) == 1

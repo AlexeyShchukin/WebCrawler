@@ -19,6 +19,8 @@ def test_outbox_event_schema_records_publishable_event_data() -> None:
     }
     assert table.c.event_id.primary_key
     assert not table.c.exchange_name.nullable
+    assert table.c.exchange_name.default is None
+    assert table.c.exchange_name.server_default is None
     assert not table.c.routing_key.nullable
     assert not table.c.payload.nullable
     assert table.c.published_at.nullable

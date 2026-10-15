@@ -54,6 +54,9 @@ def test_lease_is_expired_at_its_deadline() -> None:
     ("current", "target"),
     [
         (UrlStatus.QUEUED, UrlStatus.FETCHING),
+        (UrlStatus.QUEUED, UrlStatus.DOWNLOADED),
+        (UrlStatus.QUEUED, UrlStatus.FETCHED),
+        (UrlStatus.QUEUED, UrlStatus.FAILED),
         (UrlStatus.QUEUED, UrlStatus.SKIPPED),
         (UrlStatus.FETCHING, UrlStatus.QUEUED),
         (UrlStatus.FETCHING, UrlStatus.DOWNLOADED),

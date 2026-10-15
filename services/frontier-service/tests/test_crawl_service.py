@@ -1,35 +1,15 @@
 import asyncio
-from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from crawler_contracts import FetchUrlEvent
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.database import create_engine, create_session_factory
-from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
 from crawler_frontier.policy import FrontierPolicy
 from crawler_frontier.services import CrawlService
-from crawler_frontier.settings import FrontierSettings
 from crawler_frontier.state_machine import UrlStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_engine(
-        FrontierSettings(
-            database_url=database_url_from_environment(),
-            rabbitmq_url="amqp://crawler:secret@localhost/",
-        )
-    )
-    async with engine.connect() as connection:
-        await connection.execute(text("SELECT 1"))
-
-    yield create_session_factory(engine)
-    await engine.dispose()
 
 
 async def _remove_crawl(

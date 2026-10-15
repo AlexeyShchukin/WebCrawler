@@ -7,10 +7,12 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    FetchedValue,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -52,7 +54,9 @@ class CrawlUrl(Base):
 
     __tablename__ = "crawl_urls"
     __table_args__ = (
-        UniqueConstraint("crawl_id", "normalized_url", name="uq_crawl_urls_crawl_id_normalized_url"),
+        UniqueConstraint("crawl_id", "url_digest", name="uq_crawl_urls_crawl_id_url_digest"),
+        CheckConstraint("octet_length(url_digest) = 32", name="ck_crawl_urls_digest_length"),
+        CheckConstraint("url_digest = sha256(convert_to(normalized_url, 'UTF8'))", name="ck_crawl_urls_digest_matches"),
         UniqueConstraint("crawl_id", "id", name="uq_crawl_urls_crawl_id_id"),
         CheckConstraint("depth >= 0", name="ck_crawl_urls_depth_nonnegative"),
         CheckConstraint("fetch_attempt >= 1", name="ck_crawl_urls_fetch_attempt_positive"),
@@ -81,7 +85,8 @@ class CrawlUrl(Base):
     crawl_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("crawls.id", ondelete="CASCADE"), nullable=False
     )
-    normalized_url: Mapped[str] = mapped_column(String(4096), nullable=False)
+    normalized_url: Mapped[str] = mapped_column(String(16384), nullable=False)
+    url_digest: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False, server_default=FetchedValue())
     origin: Mapped[str] = mapped_column(String(512), nullable=False)
     depth: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[UrlStatus] = mapped_column(

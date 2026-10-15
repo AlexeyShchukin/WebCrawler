@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -26,6 +27,14 @@ class CrawlNotFoundError(LookupError):
 
 class SourceUrlNotFoundError(LookupError):
     """Raised when an admission request refers to a URL outside its crawl."""
+
+
+class UrlIdentityCollisionError(ValueError):
+    """Distinct complete URLs unexpectedly have the same bounded digest identity."""
+
+
+def url_digest(normalized_url: str) -> bytes:
+    return sha256(normalized_url.encode("utf-8")).digest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +82,7 @@ class CrawlService:
             additional_allowed_hosts: Iterable[str] = (),
     ) -> CreatedCrawl:
         """Create a crawl and queue each distinct normalized seed URL."""
-        normalized_seed_urls = _normalized_unique_urls(seed_urls)
+        normalized_seed_urls = _normalized_unique_urls(seed_urls, max_length=self._policy.max_url_length)
         if not normalized_seed_urls:
             raise UrlValidationError("A crawl requires at least one seed URL")
 
@@ -107,7 +116,7 @@ class CrawlService:
         """Store a discovered URL and its edge, deduplicating within one crawl."""
         if depth < 0:
             raise ValueError("depth must be non-negative")
-        normalized_url = normalize_url(url)
+        normalized_url = normalize_url(url, max_length=self._policy.max_url_length)
 
         async with self._session.begin():
             crawl = await self._session.scalar(
@@ -116,7 +125,11 @@ class CrawlService:
             if crawl is None:
                 raise CrawlNotFoundError(f"Crawl {crawl_id} does not exist")
 
-            source_url = await self._session.get(CrawlUrl, source_url_id)
+            source_url = await self._session.scalar(
+                select(CrawlUrl).where(
+                    CrawlUrl.id == source_url_id, CrawlUrl.crawl_id == crawl_id,
+                ).with_for_update()
+            )
             if source_url is None or source_url.crawl_id != crawl_id:
                 raise SourceUrlNotFoundError(
                     f"Source URL {source_url_id} does not belong to crawl {crawl_id}"
@@ -145,6 +158,24 @@ class CrawlService:
         url_counts.update({status: count for status, count in rows})
         return CrawlStatus(crawl_id=crawl.id, url_counts=url_counts)
 
+    async def _admit_extracted_links(self, source: CrawlUrl, links: Iterable[object]) -> None:
+        """Admit a batch inside the handler's existing crawl-first locked transaction."""
+        crawl = await self._session.get(Crawl, source.crawl_id)
+        allowed_hosts = frozenset(crawl.allowed_hosts)
+        seen: set[str] = set()
+        for link in links:
+            try:
+                normalized = normalize_url(str(link), max_length=self._policy.max_url_length)
+            except UrlValidationError:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            await self._admit_normalized_url(
+                crawl_id=source.crawl_id, allowed_hosts=allowed_hosts,
+                normalized_url=normalized, depth=source.depth + 1, source_url_id=source.id,
+            )
+
     async def _admit_normalized_url(
             self,
             *,
@@ -157,10 +188,12 @@ class CrawlService:
         existing = await self._session.scalar(
             select(CrawlUrl).where(
                 CrawlUrl.crawl_id == crawl_id,
-                CrawlUrl.normalized_url == normalized_url,
+                CrawlUrl.url_digest == url_digest(normalized_url),
             )
         )
         if existing is not None:
+            if existing.normalized_url != normalized_url:
+                raise UrlIdentityCollisionError("URL digest collision; admission rolled back")
             if source_url_id is not None:
                 await self._store_link(crawl_id, source_url_id, existing.id)
             return UrlAdmission(
@@ -194,7 +227,7 @@ class CrawlService:
                 status=UrlStatus.QUEUED,
                 fetch_attempt=1,
             )
-            .on_conflict_do_nothing(index_elements=["crawl_id", "normalized_url"])
+            .on_conflict_do_nothing(index_elements=["crawl_id", "url_digest"])
             .returning(CrawlUrl.id, CrawlUrl.status)
         )
         inserted = (await self._session.execute(statement)).one_or_none()
@@ -203,11 +236,13 @@ class CrawlService:
             existing = await self._session.scalar(
                 select(CrawlUrl).where(
                     CrawlUrl.crawl_id == crawl_id,
-                    CrawlUrl.normalized_url == normalized_url,
+                    CrawlUrl.url_digest == url_digest(normalized_url),
                 )
             )
             if existing is None:
                 raise RuntimeError("A conflicting crawl URL disappeared during admission")
+            if existing.normalized_url != normalized_url:
+                raise UrlIdentityCollisionError("URL digest collision; admission rolled back")
             url_id, stored_status, created = existing.id, existing.status, False
         else:
             url_id, stored_status, created = inserted.id, inserted.status, True
@@ -263,8 +298,8 @@ class CrawlService:
         )
 
 
-def _normalized_unique_urls(values: Iterable[str]) -> list[str]:
-    return list(dict.fromkeys(normalize_url(value) for value in values))
+def _normalized_unique_urls(values: Iterable[str], *, max_length: int) -> list[str]:
+    return list(dict.fromkeys(normalize_url(value, max_length=max_length) for value in values))
 
 
 def _allowed_hosts(seed_urls: Iterable[str], additional_hosts: Iterable[str]) -> list[str]:
