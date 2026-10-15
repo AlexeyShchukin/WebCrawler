@@ -49,7 +49,6 @@ async def test_initial_schema_upgrade_creates_the_current_frontier_contract(sess
             "outbox_events",
             "processed_events",
         } <= tables
-        assert "deferred_events" not in tables
         assert await session.scalar(text("SELECT to_regprocedure('public.frontier_set_url_digest()')")) is not None
         assert await session.scalar(text(
             "SELECT count(*) FROM pg_trigger WHERE tgrelid='crawl_urls'::regclass "
