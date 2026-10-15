@@ -28,4 +28,4 @@ The package rejects unknown fields. Consumers use `event_id` together with their
 | `PageProcessedEvent` | Content | Confirm that a page was persisted and indexed                 |
 | `PageFailedEvent` | Fetcher or Content | Report a final pipeline failure                               |
 
-Use `model_dump_json()` before publishing and `model_validate_json()` after consuming a message.
+Use `model_dump_json()` before publishing. After consuming a message, use the event model's `from_message_json()` method so the incoming envelope must include its explicit `event_id` and `created_at`.

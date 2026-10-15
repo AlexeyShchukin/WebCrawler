@@ -83,7 +83,7 @@ The broker uses durable topic exchanges named `crawler.topic`, `crawler.retry`, 
 | Exchange or routing key | Queue | Producer | Consumer | Payload |
 |---|---|---|---|---|
 | `fetch.url` | `fetch.url.queue` | Frontier | Fetcher | `crawl_id`, `url_id`, `url`, `depth`, `fetch_attempt` |
-| `crawler.retry` | `fetch.url.retry.5s.delay.queue` | Fetcher or Frontier | RabbitMQ retry topology | Unchanged `FetchUrlEvent`, published with routing key `fetch.url.retry.5s`; 5-second TTL then dead-letters it to `crawler.topic` with routing key `fetch.url` |
+| `crawler.retry` | `fetch.url.retry.5s.delay.queue` | Fetcher or Frontier | RabbitMQ retry topology | Unchanged `FetchUrlEvent` for a Fetcher pre-start delivery retry, or a `FetchUrlEvent` for a new Frontier-allocated attempt when Frontier selects this bucket for a suggested delay of at most 5 seconds; published with routing key `fetch.url.retry.5s`, then dead-lettered after a 5-second TTL to `crawler.topic` with routing key `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.30s.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.30s`; 30-second TTL then routes to `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.2m.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.2m`; 2-minute TTL then routes to `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.10m.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.10m`; 10-minute TTL then routes to `fetch.url` |
@@ -237,7 +237,7 @@ This database constraint protects against cycles, duplicate links on one page, a
 
 ### Reliable event table schema
 
-`outbox_events` has `event_id` as its primary key, plus `routing_key`, JSON `payload`, `created_at`, nullable `published_at`, `publish_attempts`, and nullable `last_publish_error`. An event is pending while `published_at` is `NULL`; a publisher records the confirmation timestamp only after RabbitMQ confirms receipt.
+`outbox_events` has `event_id` as its primary key, plus required `exchange_name` and `routing_key`, JSON `payload`, `created_at`, nullable `published_at`, `publish_attempts`, and nullable `last_publish_error`. An event is pending while `published_at` is `NULL`; a publisher records the confirmation timestamp only after RabbitMQ confirms receipt.
 
 `processed_events` has a surrogate `id`, `consumer_name`, `event_id`, and `processed_at`, with `UNIQUE (consumer_name, event_id)`. The unique constraint allows different named consumer handlers in one service to process the same incoming event while preventing the same handler from applying it twice.
 
@@ -257,7 +257,7 @@ new URL rejected by scope or limits → `skipped` admission result; no URL row, 
 
 `fetch.started` moves a matching `queued` URL to `fetching` and sets `lease_until` using Frontier's configured lease duration and clock. It is an early lease signal, not a prerequisite for applying results. `page.fetched` moves a matching `queued` or `fetching` URL to `downloaded` and clears the fetch lease; it is delivered independently to Frontier and Content. `page.processed` moves a matching `queued`, `fetching`, or `downloaded` URL to `fetched`. A Fetcher `page.failed` is accepted from `queued` or `fetching`; a Content `page.failed` is accepted from `queued`, `fetching`, or `downloaded`. A Fetcher failure or retry request cannot override a successful download. A Content-stage failure may transition a `downloaded` URL to `failed`. Terminal `fetched` and `failed` statuses never regress. For `fetch.retry_requested`, Frontier verifies that the row is `queued` or `fetching` and its stored attempt matches the event. In one transaction it either increments the stored attempt, returns the URL to `queued`, and writes a delayed `fetch.url` outbox event, or marks the URL `failed` when the attempt limit is exhausted. Terminal statuses never regress, and a late start never establishes a lease after a result. A recovery task periodically finds `fetching` rows with expired leases, allocates the next attempt, and writes it to the Frontier 30-second retry bucket through the same transaction. A worker crash after an applied `fetch.started` therefore cannot leave a URL in `fetching` forever.
 
-The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; deployment environment variables will supply them when the service runtime is added.
+The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; Frontier reads deployment environment variables at startup.
 
 ### `content_db`
 
