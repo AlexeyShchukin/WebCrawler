@@ -7,8 +7,8 @@ from collections.abc import Iterable
 from aio_pika.abc import AbstractRobustChannel, AbstractRobustConnection
 from aiormq.abc import AbstractChannel
 
-from crawler_frontier.background import WorkerHealth, run_worker
-from crawler_frontier.consumers import CONSUMERS
+from crawler_frontier.messaging.consumers import CONSUMERS
+from crawler_frontier.workers.runner import WorkerHealth, run_worker
 
 logger = logging.getLogger(__name__)
 

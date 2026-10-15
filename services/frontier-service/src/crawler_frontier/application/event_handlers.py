@@ -15,10 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from crawler_frontier.application.crawl_service import (
+    CrawlService,
+    _fetch_url_outbox_event,
+)
+from crawler_frontier.domain.policy import FrontierPolicy, can_retry
+from crawler_frontier.domain.state_machine import UrlStatus, lease_expires_at
 from crawler_frontier.models import Crawl, CrawlUrl, ProcessedEvent
-from crawler_frontier.policy import FrontierPolicy, can_retry
-from crawler_frontier.services import CrawlService, _fetch_url_outbox_event
-from crawler_frontier.state_machine import UrlStatus, lease_expires_at
 
 
 class EventIdentityError(ValueError):

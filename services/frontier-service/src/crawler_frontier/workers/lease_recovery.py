@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.background import WorkerHealth, run_worker
+from crawler_frontier.application.crawl_service import _fetch_url_outbox_event
+from crawler_frontier.domain.policy import FrontierPolicy, can_retry
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl
-from crawler_frontier.policy import FrontierPolicy, can_retry
-from crawler_frontier.services import _fetch_url_outbox_event
-from crawler_frontier.state_machine import UrlStatus
+from crawler_frontier.workers.runner import WorkerHealth, run_worker
 
 
 class LeaseRecovery:

@@ -11,14 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.state_machine import UrlStatus
-from crawler_frontier.url_policy import (
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
+from crawler_frontier.domain.url_policy import (
     UrlValidationError,
     normalize_allowed_host,
     normalize_url,
 )
+from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
 
 
 class CrawlNotFoundError(LookupError):

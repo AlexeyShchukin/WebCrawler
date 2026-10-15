@@ -18,9 +18,9 @@ from crawler_contracts import (
 from pamqp.commands import Basic
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.event_handlers import FrontierEventHandler
+from crawler_frontier.application.event_handlers import FrontierEventHandler
+from crawler_frontier.domain.policy import FrontierPolicy
 from crawler_frontier.failures import is_transient_failure
-from crawler_frontier.policy import FrontierPolicy
 
 logger = logging.getLogger(__name__)
 

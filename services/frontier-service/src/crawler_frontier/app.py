@@ -12,20 +12,20 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crawler_frontier.consumers import CONSUMERS, consumer_callback
+from crawler_frontier.application.crawl_service import CrawlNotFoundError, CrawlService
 from crawler_frontier.database import (
     create_engine,
     create_session_factory,
     database_healthcheck,
     get_session,
 )
-from crawler_frontier.lease_recovery import LeaseRecovery
-from crawler_frontier.outbox import OutboxPublisher
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlNotFoundError, CrawlService
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.url_policy import UrlValidationError
+from crawler_frontier.messaging.consumers import CONSUMERS, consumer_callback
+from crawler_frontier.messaging.outbox import OutboxPublisher
+from crawler_frontier.messaging.subscriptions import ConsumerSubscriptions
 from crawler_frontier.settings import FrontierSettings
-from crawler_frontier.subscriptions import ConsumerSubscriptions
-from crawler_frontier.url_policy import UrlValidationError
+from crawler_frontier.workers.lease_recovery import LeaseRecovery
 
 logger = logging.getLogger(__name__)
 _CONSUMER_POLL_INTERVAL_SECONDS = 1.0

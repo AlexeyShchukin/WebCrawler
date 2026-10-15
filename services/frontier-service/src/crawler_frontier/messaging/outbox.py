@@ -9,9 +9,9 @@ from pamqp.commands import Basic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.background import WorkerHealth, run_worker
 from crawler_frontier.models import OutboxEvent
 from crawler_frontier.models.reliability import utc_now
+from crawler_frontier.workers.runner import WorkerHealth, run_worker
 
 
 class OutboxPublisher:

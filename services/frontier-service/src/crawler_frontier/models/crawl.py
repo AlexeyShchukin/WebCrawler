@@ -22,8 +22,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models.base import Base
-from crawler_frontier.state_machine import UrlStatus
 
 
 def utc_now() -> datetime:
