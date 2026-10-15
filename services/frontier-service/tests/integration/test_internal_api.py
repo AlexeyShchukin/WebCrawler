@@ -8,9 +8,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from crawler_frontier.app import create_app
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.state_machine import UrlStatus
 
 
 @pytest.mark.integration

@@ -1,7 +1,7 @@
 from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
 
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
-from crawler_frontier.state_machine import UrlStatus
 
 
 def _index_by_name(table, name: str):

@@ -16,8 +16,8 @@ from aiormq.connection import Connection
 from pamqp.commands import Basic
 from pamqp.commands import Connection as ConnectionFrames
 
-from crawler_frontier.outbox import OutboxPublisher
-from crawler_frontier.subscriptions import ConsumerSubscriptions
+from crawler_frontier.messaging.outbox import OutboxPublisher
+from crawler_frontier.messaging.subscriptions import ConsumerSubscriptions
 
 
 class MemoryOutbox:

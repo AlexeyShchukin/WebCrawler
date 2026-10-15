@@ -6,10 +6,10 @@ from crawler_contracts import FetchUrlEvent
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
-from crawler_frontier.state_machine import UrlStatus
 
 
 async def _remove_crawl(

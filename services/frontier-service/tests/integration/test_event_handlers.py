@@ -19,35 +19,11 @@ from crawler_contracts import (
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from crawler_frontier.event_handlers import FrontierEventHandler
+from crawler_frontier.application.event_handlers import FrontierEventHandler
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl, OutboxEvent, ProcessedEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.state_machine import UrlStatus
-
-
-async def _create_url(
-    session_factory: async_sessionmaker[AsyncSession],
-    *,
-    status: UrlStatus,
-    fetch_attempt: int = 1,
-    lease_until: datetime | None = None,
-) -> tuple[UUID, UUID]:
-    async with session_factory() as session, session.begin():
-        crawl = Crawl(seed_urls=[], allowed_hosts=[])
-        session.add(crawl)
-        await session.flush()
-        url = CrawlUrl(
-            crawl_id=crawl.id,
-            normalized_url=f"https://{uuid4().hex}.example.test/page",
-            origin="https://example.test",
-            depth=0,
-            status=status,
-            fetch_attempt=fetch_attempt,
-            lease_until=lease_until,
-        )
-        session.add(url)
-        await session.flush()
-        return crawl.id, url.id
+from tests.integration.helpers import _create_url
 
 
 async def _remove_crawl(session_factory: async_sessionmaker[AsyncSession], crawl_id: UUID) -> None:
@@ -253,7 +229,7 @@ async def test_concurrent_duplicate_delivery_is_acknowledgeable_without_unique_c
 @pytest.mark.asyncio
 @pytest.mark.parametrize("identity", ["older", "future", "unknown", "other_crawl"])
 async def test_invalid_attempt_or_identity_never_changes_state_or_schedules_work(session_factory, identity):
-    from crawler_frontier.event_handlers import EventIdentityError
+    from crawler_frontier.application.event_handlers import EventIdentityError
 
     crawl_id, url_id = await _create_url(session_factory, status=UrlStatus.FETCHING, fetch_attempt=2)
     event = PageProcessedEvent(crawl_id=(uuid4() if identity == "other_crawl" else crawl_id),

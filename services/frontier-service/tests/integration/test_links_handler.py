@@ -5,13 +5,13 @@ import pytest
 from crawler_contracts import LinksExtractedEvent
 from sqlalchemy import func, select
 
-from crawler_frontier.consumers import CONSUMERS
-from crawler_frontier.event_handlers import FrontierEventHandler
-from crawler_frontier.lease_recovery import LeaseRecovery
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.application.event_handlers import FrontierEventHandler
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
+from crawler_frontier.messaging.consumers import CONSUMERS
 from crawler_frontier.models import CrawlUrl, Link, OutboxEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
-from crawler_frontier.state_machine import UrlStatus
+from crawler_frontier.workers.lease_recovery import LeaseRecovery
 
 
 @pytest.mark.integration

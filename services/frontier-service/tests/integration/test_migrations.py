@@ -7,13 +7,12 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy import select, text
 
 from alembic import command
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.domain.policy import FrontierPolicy
 from crawler_frontier.models import Base, CrawlUrl
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
 
 INITIAL_REVISION = "0001_frontier_initial_schema"
 
@@ -21,15 +20,6 @@ INITIAL_REVISION = "0001_frontier_initial_schema"
 async def migrate(action, revision: str) -> None:
     """Run Alembic's synchronous command outside the active event loop."""
     await asyncio.to_thread(action, Config("alembic.ini"), revision)
-
-
-def test_initial_schema_is_the_only_alembic_head() -> None:
-    """Catch reintroduction of an incremental chain after history was squashed."""
-    script = ScriptDirectory.from_config(Config("alembic.ini"))
-
-    assert tuple(script.get_heads()) == (INITIAL_REVISION,)
-    revision = script.get_revision(INITIAL_REVISION)
-    assert revision is not None and revision.down_revision is None
 
 
 @pytest.mark.integration

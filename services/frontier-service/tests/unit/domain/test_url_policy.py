@@ -1,6 +1,6 @@
 import pytest
 
-from crawler_frontier.url_policy import (
+from crawler_frontier.domain.url_policy import (
     UrlValidationError,
     is_allowed_url,
     normalize_allowed_host,

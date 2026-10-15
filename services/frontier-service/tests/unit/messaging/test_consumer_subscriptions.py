@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from pamqp.commands import Basic, Queue
 
 from crawler_frontier import app as application
-from crawler_frontier.background import WorkerHealth
-from crawler_frontier.consumers import CONSUMERS
+from crawler_frontier.messaging.consumers import CONSUMERS
+from crawler_frontier.workers.runner import WorkerHealth
 
 
 async def until(predicate):

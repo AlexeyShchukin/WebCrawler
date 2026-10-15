@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -9,24 +8,9 @@ from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from crawler_frontier.messaging.outbox import OutboxPublisher
 from crawler_frontier.models import OutboxEvent
-from crawler_frontier.outbox import OutboxPublisher
-
-
-async def _create_pending_event(
-    session_factory: async_sessionmaker[AsyncSession], *,
-    exchange_name: str = "crawler.topic", routing_key: str = "fetch.url",
-) -> OutboxEvent:
-    event = OutboxEvent(
-        event_id=uuid4(),
-        exchange_name=exchange_name,
-        routing_key=routing_key,
-        payload={"event_id": str(uuid4())},
-        created_at=datetime(1970, 1, 1, tzinfo=UTC),
-    )
-    async with session_factory() as session, session.begin():
-        session.add(event)
-    return event
+from tests.integration.helpers import _create_pending_event
 
 
 async def _delete_event(session_factory: async_sessionmaker[AsyncSession], event_id) -> None:

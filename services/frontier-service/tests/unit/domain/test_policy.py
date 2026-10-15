@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from crawler_frontier.policy import FrontierPolicy, can_retry
-from crawler_frontier.state_machine import (
+from crawler_frontier.domain.policy import FrontierPolicy, can_retry
+from crawler_frontier.domain.state_machine import (
     InvalidStateTransition,
     UrlStatus,
     is_lease_expired,

@@ -12,17 +12,20 @@ from crawler_contracts import (
     PageProcessedEvent,
 )
 from sqlalchemy import delete, func, select, text
-from test_event_handlers import _create_url
 
+from crawler_frontier.application.crawl_service import (
+    CrawlService,
+    SourceUrlNotFoundError,
+)
+from crawler_frontier.application.event_handlers import FrontierEventHandler
 from crawler_frontier.database import create_engine, create_session_factory
-from crawler_frontier.event_handlers import FrontierEventHandler
-from crawler_frontier.lease_recovery import LeaseRecovery
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Crawl, CrawlUrl, OutboxEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService, SourceUrlNotFoundError
 from crawler_frontier.settings import FrontierSettings
-from crawler_frontier.state_machine import UrlStatus
+from crawler_frontier.workers.lease_recovery import LeaseRecovery
+from tests.integration.helpers import _create_url
 
 
 @pytest.mark.integration

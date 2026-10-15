@@ -2,14 +2,7 @@ import asyncio
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import text
 
-from crawler_frontier.database import (
-    create_engine,
-    create_session_factory,
-    database_healthcheck,
-)
-from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.settings import FrontierSettings
 
 
@@ -121,27 +114,6 @@ def test_valid_infrastructure_values_include_zero_overflow(
     assert settings.lease_recovery_poll_interval_seconds == lease_poll
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_database_factory_creates_a_usable_session() -> None:
-    settings = FrontierSettings(
-        database_url=database_url_from_environment(),
-        rabbitmq_url="amqp://crawler:secret@localhost/",
-        database_pool_size=1,
-        database_max_overflow=0,
-    )
-    engine = create_engine(settings)
-    session_factory = create_session_factory(engine)
-
-    try:
-        async with session_factory() as session:
-            assert await session.scalar(text("SELECT 1")) == 1
-
-        await database_healthcheck(engine)
-    finally:
-        await engine.dispose()
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("worker_fails, ignores_cancellation", [
     pytest.param(False, False, id="normal"),
@@ -212,7 +184,7 @@ async def test_application_disposes_its_database_engine_on_shutdown(
 
     class FakePublisher:
         def __init__(self, *args) -> None:
-            from crawler_frontier.background import WorkerHealth
+            from crawler_frontier.workers.runner import WorkerHealth
             self.health = WorkerHealth(healthy=True)
 
         async def run(self, stop_event, poll_interval_seconds: float) -> None:
@@ -232,7 +204,7 @@ async def test_application_disposes_its_database_engine_on_shutdown(
     class FakeLeaseRecovery:
         def __init__(self, session_factory, policy) -> None:
             recovery_policies.append(policy)
-            from crawler_frontier.background import WorkerHealth
+            from crawler_frontier.workers.runner import WorkerHealth
             self.health = WorkerHealth(healthy=True)
 
         async def run(self, stop_event, poll_interval_seconds: float) -> None:

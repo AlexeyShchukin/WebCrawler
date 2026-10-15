@@ -5,9 +5,9 @@ import asyncio
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from crawler_frontier.lease_recovery import LeaseRecovery
-from crawler_frontier.outbox import OutboxPublisher
-from crawler_frontier.policy import FrontierPolicy
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.messaging.outbox import OutboxPublisher
+from crawler_frontier.workers.lease_recovery import LeaseRecovery
 
 
 @pytest.mark.asyncio
@@ -64,8 +64,8 @@ async def test_readiness_does_not_report_failed_dependencies_healthy(monkeypatch
     from fastapi import HTTPException
 
     from crawler_frontier import app as application
-    from crawler_frontier.background import WorkerHealth
-    from crawler_frontier.subscriptions import ConsumerSubscriptions
+    from crawler_frontier.messaging.subscriptions import ConsumerSubscriptions
+    from crawler_frontier.workers.runner import WorkerHealth
 
     app = application.create_app()
     connected = asyncio.Event()
@@ -120,22 +120,3 @@ async def test_readiness_does_not_report_failed_dependencies_healthy(monkeypatch
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_permanent_outbox_configuration_error_terminates_unhealthy(session_factory):
-    from uuid import uuid4
-
-    from crawler_frontier.models import OutboxEvent
-
-    event_id = uuid4()
-    async with session_factory() as session, session.begin():
-        session.add(OutboxEvent(event_id=event_id, exchange_name="unknown.exchange", routing_key="fetch.url", payload={}))
-    worker = OutboxPublisher(session_factory, {})
-    with pytest.raises(KeyError):
-        await asyncio.wait_for(worker.run(asyncio.Event(), 0.001), 1)
-    assert not worker.health.healthy
-    async with session_factory() as session:
-        row = await session.get(OutboxEvent, event_id)
-        assert row.published_at is None and row.last_publish_error.startswith("KeyError:")

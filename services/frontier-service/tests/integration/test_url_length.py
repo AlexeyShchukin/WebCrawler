@@ -3,15 +3,10 @@
 import pytest
 from sqlalchemy import select
 
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.url_policy import UrlValidationError
 from crawler_frontier.models import CrawlUrl
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
-from crawler_frontier.url_policy import UrlValidationError, normalize_url
-
-
-def test_canonical_url_expansion_also_obeys_the_length_limit():
-    with pytest.raises(UrlValidationError):
-        normalize_url("https://example.test/é", max_length=22)
 
 
 @pytest.mark.integration

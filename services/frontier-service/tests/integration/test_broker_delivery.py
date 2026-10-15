@@ -9,14 +9,14 @@ import pytest
 import pytest_asyncio
 from crawler_contracts import FetchStartedEvent
 from dotenv import load_dotenv
-from test_consumers import malformed_event_body
-from test_outbox_publisher import _create_pending_event
 
-from crawler_frontier.consumers import consumer_callback
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.messaging.consumers import consumer_callback
+from crawler_frontier.messaging.outbox import OutboxPublisher
 from crawler_frontier.migration_settings import LOCAL_ENV_FILE
 from crawler_frontier.models import OutboxEvent
-from crawler_frontier.outbox import OutboxPublisher
-from crawler_frontier.policy import FrontierPolicy
+from tests.integration.helpers import _create_pending_event
+from tests.support.event_payloads import malformed_event_body
 
 
 @pytest_asyncio.fixture

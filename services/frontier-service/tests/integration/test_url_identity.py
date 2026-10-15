@@ -9,10 +9,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from crawler_frontier import services
+from crawler_frontier.application import crawl_service as services
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.domain.policy import FrontierPolicy
 from crawler_frontier.models import Crawl, CrawlUrl, Link, OutboxEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
 
 
 @pytest.mark.integration

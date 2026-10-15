@@ -14,13 +14,16 @@ from crawler_contracts import (
     PageProcessedEvent,
 )
 from sqlalchemy import func, select
-from test_event_handlers import _create_url
 
-from crawler_frontier.event_handlers import EventIdentityError, FrontierEventHandler
+from crawler_frontier.application.crawl_service import CrawlService
+from crawler_frontier.application.event_handlers import (
+    EventIdentityError,
+    FrontierEventHandler,
+)
+from crawler_frontier.domain.policy import FrontierPolicy
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import CrawlUrl, Link, OutboxEvent, ProcessedEvent
-from crawler_frontier.policy import FrontierPolicy
-from crawler_frontier.services import CrawlService
-from crawler_frontier.state_machine import UrlStatus
+from tests.integration.helpers import _create_url
 
 
 @pytest.mark.integration
