@@ -8,6 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from crawler_frontier.migration_settings import database_url_for_alembic_config
 from crawler_frontier.migration_settings import database_url_from_environment
 from crawler_frontier.models import Base
 
@@ -16,7 +17,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", database_url_from_environment())
+config.set_main_option("sqlalchemy.url", database_url_for_alembic_config(database_url_from_environment()))
 
 target_metadata = Base.metadata
 

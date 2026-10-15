@@ -37,3 +37,8 @@ def database_url_from_environment(*, env_file: Path = LOCAL_ENV_FILE) -> str:
         port=5433,
         database="frontier_db",
     ).render_as_string(hide_password=False)
+
+
+def database_url_for_alembic_config(database_url: str) -> str:
+    """Escape a SQLAlchemy URL for Alembic's ConfigParser-backed configuration."""
+    return database_url.replace("%", "%%")
