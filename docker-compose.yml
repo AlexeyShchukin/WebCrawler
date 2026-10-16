@@ -152,6 +152,25 @@ services:
       - api_frontier
       - api_content
 
+  frontier-migrate:
+    profiles: ["services"]
+    build:
+      context: .
+      dockerfile: services/frontier-service/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      FRONTIER_DATABASE_HOST: postgres
+      FRONTIER_DATABASE_PORT: "5432"
+      FRONTIER_DATABASE_NAME: frontier_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - frontier_postgres
+
   frontier:
     profiles: ["services"]
     build:
@@ -177,6 +196,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      frontier-migrate:
+        condition: service_completed_successfully
       rabbitmq-init:
         condition: service_completed_successfully
     networks:
