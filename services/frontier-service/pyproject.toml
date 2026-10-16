@@ -11,12 +11,15 @@ dependencies = [
     "crawler-contracts>=0.1.0",
     "fastapi>=0.115,<1",
     "pydantic>=2.10,<3",
+    "pydantic-settings>=2.7,<3",
+    "python-dotenv>=1.2,<2",
     "sqlalchemy>=2.0,<3",
     "uvicorn[standard]>=0.34,<1",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28,<1",
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.25,<1",
     "ruff>=0.9,<1",
@@ -31,3 +34,9 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "crawler_frontier"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires the local Frontier PostgreSQL database",
+]
+addopts = "-m 'not integration'"

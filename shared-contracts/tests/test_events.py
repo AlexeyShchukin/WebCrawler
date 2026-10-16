@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -33,7 +34,7 @@ def fetch_envelope() -> dict[str, object]:
     ("event_type", "payload"),
     [
         (FetchUrlEvent, {"url": "https://example.com/", "depth": 0}),
-        (FetchStartedEvent, {"lease_seconds": 60}),
+        (FetchStartedEvent, {}),
         (
             FetchRetryRequestedEvent,
             {
@@ -71,6 +72,7 @@ def test_events_preserve_the_common_envelope(
     assert event.url_id == envelope["url_id"]
     assert event.fetch_attempt == 1
     assert event.created_at.tzinfo is not None
+    assert event_type.from_message_json(event.model_dump_json()) == event
 
 
 def test_event_round_trips_through_json() -> None:
@@ -114,12 +116,11 @@ def test_event_rejects_non_utc_timestamp() -> None:
         )
 
 
-def test_event_rejects_unknown_fields() -> None:
-    with pytest.raises(ValidationError, match="unexpected"):
+def test_fetch_started_event_rejects_fetcher_lease_configuration() -> None:
+    with pytest.raises(ValidationError, match="lease_seconds"):
         FetchStartedEvent(
             **fetch_envelope(),
             lease_seconds=60,
-            unexpected="value",
         )
 
 
@@ -153,3 +154,62 @@ def test_page_fetched_event_rejects_inline_html() -> None:
             content_ref="crawls/5f4a/urls/4d3c/fetches/1.html",
             html="<html><body>Example</body></html>",
         )
+
+
+def test_outgoing_defaults_are_preserved_without_regenerating_received_fields():
+    event = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
+    assert event.event_id is not None
+    assert event.created_at.utcoffset() == timedelta(0)
+    body = event.model_dump_json()
+    first = FetchStartedEvent.from_message_json(body)
+    second = FetchStartedEvent.from_message_json(body)
+    assert first == second == event
+
+
+@pytest.mark.parametrize("missing", [
+    ("event_id",), ("created_at",), ("event_id", "created_at"),
+])
+def test_repeated_incoming_json_cannot_generate_missing_envelope_fields(missing):
+    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    for field in missing:
+        payload.pop(field)
+    body = json.dumps(payload)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="event_id|created_at"):
+            FetchStartedEvent.from_message_json(body)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("event_id", None), ("event_id", "not-a-uuid"),
+    ("created_at", None), ("created_at", "not-a-date"),
+    ("created_at", "2026-10-12T12:00:00"),
+    ("created_at", "2026-10-12T12:00:00+03:00"),
+])
+def test_incoming_envelope_rejects_invalid_identity_or_timestamp(field, value):
+    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    payload[field] = value
+    with pytest.raises(ValidationError, match=field):
+        FetchStartedEvent.from_message_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("field", ["event_id", "created_at"])
+def test_incoming_json_rejects_duplicate_envelope_keys(field):
+    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    body = '{' + json.dumps(field) + ':' + json.dumps(payload[field]) + ',' + json.dumps(payload)[1:]
+    with pytest.raises(ValueError, match=field):
+        FetchStartedEvent.from_message_json(body)
+
+
+@pytest.mark.parametrize("body", ["null", "[]", "42", '"event"'])
+def test_incoming_json_requires_an_object(body):
+    with pytest.raises(TypeError):
+        FetchStartedEvent.from_message_json(body)
+
+
+def test_equal_timestamps_do_not_merge_different_events():
+    first = FetchStartedEvent(**fetch_envelope())
+    second = FetchStartedEvent(crawl_id=first.crawl_id, url_id=first.url_id,
+                               fetch_attempt=1, created_at=first.created_at)
+    restored = [FetchStartedEvent.from_message_json(event.model_dump_json()) for event in (first, second)]
+    assert restored[0].created_at == restored[1].created_at
+    assert restored[0].event_id != restored[1].event_id

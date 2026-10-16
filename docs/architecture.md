@@ -9,7 +9,7 @@ The architecture uses four independently deployable services. Every service has 
 ## Goals
 
 - Crawl URLs reachable from configured seed URLs.
-- Store every discovered page as a graph node and every discovered hyperlink as a graph edge.
+- Store admitted URLs as graph nodes and discovered hyperlinks between admitted nodes as graph edges.
 - Avoid duplicate fetch tasks for each normalized URL while allowing bounded retries after a started fetch execution fails.
 - Extract page title, visible text, links, and weighted keywords.
 - Search indexed content by words and phrases.
@@ -51,7 +51,7 @@ flowchart LR
 1. The API Service accepts seed URLs and creates a crawl through the Frontier Service's internal HTTP API.
 2. Frontier stores new URLs and publishes a `fetch.url` message for each accepted URL.
 3. Fetcher consumes the message and first acquires Redis origin permission. If permission infrastructure is temporarily unavailable, it sends the unchanged message to the 5-second broker retry bucket without allocating a new attempt. Otherwise it publishes `fetch.started` immediately before fetch execution, downloads the page within the configured response-size limit, stores its raw HTML in object storage, and publishes `page.fetched` with `content_ref`, `fetch.retry_requested` for a retryable fetch-execution failure, or `page.failed` for a final failure.
-4. Frontier consumes its copy of `page.fetched`, clears the fetch lease, and moves the matching URL to `downloaded`. Frontier consumes `fetch.retry_requested` only for a matching started execution. It alone allocates the next attempt, selects a retry bucket from `suggested_delay_seconds`, and writes the delayed `fetch.url` event through its outbox. A stale event is ignored.
+4. Frontier consumes its copy of `page.fetched`, clears the fetch lease, and moves the matching URL to `downloaded`. Results of the current allocated attempt apply even when Frontier has not yet consumed `fetch.started`. Frontier consumes `fetch.retry_requested` while the matching URL is `queued` or `fetching`. It alone allocates the next attempt, selects a retry bucket from `suggested_delay_seconds`, and writes the delayed `fetch.url` event through its outbox. A stale event is ignored.
 5. Content consumes successful pages, reads raw HTML from object storage using `content_ref`, extracts content and links, saves content data, and indexes the page.
 6. Content publishes `links.extracted` and `page.processed`.
 7. Frontier saves graph edges, admits only new URLs, and marks processed pages as fetched.
@@ -83,11 +83,11 @@ The broker uses durable topic exchanges named `crawler.topic`, `crawler.retry`, 
 | Exchange or routing key | Queue | Producer | Consumer | Payload |
 |---|---|---|---|---|
 | `fetch.url` | `fetch.url.queue` | Frontier | Fetcher | `crawl_id`, `url_id`, `url`, `depth`, `fetch_attempt` |
-| `crawler.retry` | `fetch.url.retry.5s.delay.queue` | Fetcher or Frontier | RabbitMQ retry topology | Unchanged `FetchUrlEvent`, published with routing key `fetch.url.retry.5s`; 5-second TTL then dead-letters it to `crawler.topic` with routing key `fetch.url` |
+| `crawler.retry` | `fetch.url.retry.5s.delay.queue` | Fetcher or Frontier | RabbitMQ retry topology | Unchanged `FetchUrlEvent` for a Fetcher pre-start delivery retry, or a `FetchUrlEvent` for a new Frontier-allocated attempt when Frontier selects this bucket for a suggested delay of at most 5 seconds; published with routing key `fetch.url.retry.5s`, then dead-lettered after a 5-second TTL to `crawler.topic` with routing key `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.30s.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.30s`; 30-second TTL then routes to `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.2m.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.2m`; 2-minute TTL then routes to `fetch.url` |
 | `crawler.retry` | `fetch.url.retry.10m.delay.queue` | Frontier | RabbitMQ retry topology | `FetchUrlEvent` for a new Frontier-allocated attempt; routing key `fetch.url.retry.10m`; 10-minute TTL then routes to `fetch.url` |
-| `fetch.started` | `fetch.started.queue` | Fetcher | Frontier | URL identity, fetch attempt identity, and lease duration |
+| `fetch.started` | `fetch.started.queue` | Fetcher | Frontier | URL identity and fetch attempt identity |
 | `fetch.retry_requested` | `fetch.retry_requested.queue` | Fetcher | Frontier | URL identity, current attempt, failure category, and suggested delay |
 | `page.fetched` | `page.fetched.content.queue` | Fetcher | Content | URL identity, status, content type, and object-storage `content_ref` |
 | `page.fetched` | `page.fetched.frontier.queue` | Fetcher | Frontier | URL identity, fetch attempt identity, and `content_ref` for lease release |
@@ -202,22 +202,24 @@ Frontier normalizes every URL before storing it:
 - Allow only `http` and `https` schemes.
 - Resolve relative URLs before normalization.
 - Remove fragments such as `#section`.
-- Lowercase the hostname.
+- Lowercase and IDNA-canonicalize the hostname. Remove a DNS trailing dot; validate hostname labels and reject ports in hostname allowlists.
 - Remove the default port for the scheme.
 - Convert an empty path to `/`, so `http://example.com` and `http://example.com/` have one identity.
 - Reject malformed URLs, userinfo, and URLs exceeding the configured size limit.
 
-Query parameters are preserved. The crawler does not sort, remove, or rewrite them because they can change page meaning. It does not equate `/path` and `/path/`. The original URL is retained for diagnostics; the normalized URL is used for uniqueness.
+Frontier uses Pydantic `AnyHttpUrl` for URL parsing and validation. Event contracts also use `AnyHttpUrl`, but they do not apply Frontier's full normalization policy. Frontier percent-encodes Unicode paths and resolves dot segments as part of canonicalization. Query parameter order is preserved; Frontier does not sort or remove parameters because they can change page meaning. It does not equate `/path` and `/path/`. The complete canonical URL is retained; no separate original-input column is currently stored.
 
-Each crawl has an allowed-host policy. By default, only URLs whose normalized hostname exactly matches a seed hostname are eligible for fetching. Frontier records an out-of-scope link as a graph edge and marks its URL as `skipped`; it never creates a fetch task for it. An explicit allowlist can extend the policy when a crawl must cover several hosts.
+Each crawl has an allowed-host policy. By default, only URLs whose normalized hostname exactly matches a seed hostname are eligible for fetching. A newly discovered out-of-scope URL is not persisted and never creates a fetch task or graph edge. An explicit allowlist can extend the policy when a crawl must cover several hosts.
+
+Hostname scope, depth, crawl-size, and per-origin limits are admission limits, not only scheduling limits. A newly discovered URL rejected by one of them is not persisted as a URL node or graph edge and produces no `fetch.url` event; otherwise an unlimited number of rejected links could exhaust Frontier storage. A duplicate of an already admitted URL remains eligible for graph-edge deduplication and does not consume another limit slot.
 
 The `crawl_urls` table has a database constraint:
 
 ```sql
-UNIQUE (crawl_id, normalized_url)
+UNIQUE (crawl_id, url_digest)
 ```
 
-When Frontier receives a URL, it inserts it using `INSERT ... ON CONFLICT DO NOTHING`. A successful insert means the URL is new and creates a durable `fetch.url` outbox event. A conflict means the URL was already discovered; Frontier stores the edge but does not create another fetch task.
+The database derives a 32-byte SHA-256 digest from the complete canonical URL. Frontier inserts using `INSERT ... ON CONFLICT DO NOTHING`. A successful insert creates a durable `fetch.url` outbox event. On conflict, Frontier compares complete URL strings before treating the URL as a duplicate and storing an edge. Different strings with the same digest abort admission explicitly.
 
 This database constraint protects against cycles, duplicate links on one page, and races between multiple Content workers.
 
@@ -227,15 +229,15 @@ This database constraint protects against cycles, duplicate links on one page, a
 
 | Table | Purpose |
 |---|---|
-| `crawls` | Crawl ID, state, timestamps, limits, and counters |
+| `crawls` | Crawl ID, seed URLs, persisted per-crawl allowed hosts, and creation timestamp; state and URL counts are derived |
 | `crawl_urls` | One normalized URL per crawl, depth, status, fetch lease, and error details |
-| `links` | Directed graph edges between source and target URLs |
+| `links` | Directed graph edges between source and target URLs in the same crawl; database constraints reject cross-crawl edges |
 | `outbox_events` | Durable events waiting for RabbitMQ publisher confirmation |
 | `processed_events` | Consumed handler and event IDs; `UNIQUE (consumer_name, event_id)` enforces idempotency |
 
 ### Reliable event table schema
 
-`outbox_events` has `event_id` as its primary key, plus `routing_key`, JSON `payload`, `created_at`, nullable `published_at`, `publish_attempts`, and nullable `last_publish_error`. An event is pending while `published_at` is `NULL`; a publisher records the confirmation timestamp only after RabbitMQ confirms receipt.
+`outbox_events` has `event_id` as its primary key, plus required `exchange_name` and `routing_key`, JSON `payload`, `created_at`, nullable `published_at`, `publish_attempts`, and nullable `last_publish_error`. An event is pending while `published_at` is `NULL`; a publisher records the confirmation timestamp only after RabbitMQ confirms receipt.
 
 `processed_events` has a surrogate `id`, `consumer_name`, `event_id`, and `processed_at`, with `UNIQUE (consumer_name, event_id)`. The unique constraint allows different named consumer handlers in one service to process the same incoming event while preventing the same handler from applying it twice.
 
@@ -243,17 +245,19 @@ URL statuses follow this state flow:
 
 ```text
 queued → fetching → downloaded → fetched
+queued → downloaded or fetched (result delivered before `fetch.started`)
 fetching → fetched (out-of-order `page.processed`)
-queued, fetching, or downloaded → failed
-fetching → queued (retry or expired lease)
-queued → skipped
+queued, fetching, or downloaded → failed (eligible fetch/content failure)
+queued or fetching → queued with a new attempt (retry)
+fetching → queued with a new attempt (expired lease)
+new URL rejected by scope or limits → `skipped` admission result; no URL row, graph edge, or outbox event is created
 ```
 
 `downloaded` means that Fetcher successfully stored raw HTML and Frontier released the fetch lease. `fetched` means that Content successfully persisted and indexed the page. An HTTP 200 response alone does not mark a URL as fetched.
 
-`fetch.started` moves a URL from `queued` to `fetching` and sets `lease_until`. Frontier accepts it only when its `fetch_attempt` matches the currently scheduled execution. `page.fetched` moves a matching `fetching` URL to `downloaded` and clears the fetch lease; it is delivered independently to Frontier and Content. `page.processed` moves a matching `downloaded` URL to `fetched`. Frontier also accepts a matching `page.processed` from `fetching` to tolerate cross-queue delivery order; a later `page.fetched` is then stale and ignored. A Fetcher `page.failed` is accepted only from `fetching`; a Content `page.failed` is accepted from `downloaded` or `fetching` for the same ordering reason. For `fetch.retry_requested`, Frontier verifies that the row is still `fetching` and its stored attempt matches the event. In one transaction it either increments the stored attempt, returns the URL to `queued`, and writes a delayed `fetch.url` outbox event, or marks the URL `failed` when the attempt limit is exhausted. A recovery task periodically finds `fetching` rows with expired leases and follows the same Frontier-owned scheduling path. A worker crash after `fetch.started` therefore cannot leave a URL in `fetching` forever.
+`fetch.started` moves a matching `queued` URL to `fetching` and sets `lease_until` using Frontier's configured lease duration and clock. It is an early lease signal, not a prerequisite for applying results. `page.fetched` moves a matching `queued` or `fetching` URL to `downloaded` and clears the fetch lease; it is delivered independently to Frontier and Content. `page.processed` moves a matching `queued`, `fetching`, or `downloaded` URL to `fetched`. A Fetcher `page.failed` is accepted from `queued` or `fetching`; a Content `page.failed` is accepted from `queued`, `fetching`, or `downloaded`. A Fetcher failure or retry request cannot override a successful download. A Content-stage failure may transition a `downloaded` URL to `failed`. Terminal `fetched` and `failed` statuses never regress. For `fetch.retry_requested`, Frontier verifies that the row is `queued` or `fetching` and its stored attempt matches the event. In one transaction it either increments the stored attempt, returns the URL to `queued`, and writes a delayed `fetch.url` outbox event, or marks the URL `failed` when the attempt limit is exhausted. Terminal statuses never regress, and a late start never establishes a lease after a result. A recovery task periodically finds `fetching` rows with expired leases, allocates the next attempt, and writes it to the Frontier 30-second retry bucket through the same transaction. A worker crash after an applied `fetch.started` therefore cannot leave a URL in `fetching` forever.
 
-The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; deployment environment variables will supply them when the service runtime is added.
+The initial Frontier policy uses a maximum of 3 fetch attempts, a 120-second fetch lease, and a 4,096-character URL limit. These values are validated configuration, not hard-coded scheduling decisions; Frontier reads deployment environment variables at startup.
 
 ### `content_db`
 
@@ -338,6 +342,112 @@ Frontier exposes `POST /internal/crawls` and `GET /internal/crawls/{crawl_id}`. 
 - Set a bounded prefetch value so one worker does not claim an unlimited number of messages.
 
 ## Reliable Event Delivery
+
+### Frontier concurrency and recovery invariants
+
+Every transaction that changes a crawl URL first locks its `crawls` row with
+`FOR UPDATE`, then locks existing `crawl_urls` rows, then accesses the incoming
+event ledger. A transaction operates on only one crawl. When multiple existing
+URL rows must be locked, they are acquired in ascending UUID order. URL admission,
+pipeline handlers, retry allocation, and extracted-link
+admission follow this order. A newly inserted crawl is transaction-private until
+commit and already provides the equivalent exclusion for its seeds.
+
+Lease recovery selects one crawl with expired leases using `FOR UPDATE SKIP
+LOCKED`, then rechecks and locks a bounded batch of its expired URLs with `FOR
+UPDATE SKIP LOCKED`. It never locks a URL and subsequently waits for a crawl.
+All status and attempt predicates are checked after locking. No path holds one
+crawl while acquiring another. This excludes cycles between crawl and URL locks;
+different crawls can progress independently. The deliberate tradeoff is serialized
+state changes within one crawl. Outbox publishing locks only outbox rows and never
+acquires crawl or URL locks.
+
+For every pipeline event, the crawl and URL identities must agree and
+`event.fetch_attempt` must equal the stored attempt. Older attempts are recorded
+as ignored without changing URL state or publishing work. Future/unallocated
+attempts and unknown identities are permanent invalid events, sent to the DLQ.
+One retry allocation changes the URL and inserts exactly one outbox event in the
+same transaction; a final attempt becomes `failed` without an outgoing fetch.
+
+### Frontier result delivery order
+
+Independent queues do not guarantee that `fetch.started` is applied before its
+outcome. A valid result from the designated producer for the current
+Frontier-allocated attempt is sufficient evidence of execution: Frontier applies
+it directly from `queued`, without manufacturing a start event or a fetch lease.
+Envelope validation alone does not authenticate a producer. Current Compose uses
+shared RabbitMQ credentials and no routing-key permissions, so this remains an
+architectural limitation. The contract requires a future Fetcher to publish
+`fetch.started` before execution and one outcome per execution; Frontier does not
+require their delivery order. Pre-request infrastructure retries are not yet
+implemented.
+
+Under the Crawl -> CrawlUrl locks, state changes, the processed marker, and any
+outgoing outbox events commit atomically before acknowledgement. Older attempts
+are recorded as ignored; future attempts and unknown identities go to the DLQ.
+Duplicate results have no repeated effects. A late start never changes a
+downloaded or terminal URL; a start from an older attempt never claims a new one.
+If contradictory terminal outcomes arrive for the same attempt, the first
+applied terminal outcome wins. Once downloading is confirmed, fetch-stage failure
+and retry requests cannot move the URL back into fetch scheduling.
+
+`links.extracted` for the current attempt preserves graph data from `queued`,
+`fetching`, `downloaded`, `fetched`, or `failed`. From `queued` or `fetching`, this
+Content event establishes `downloaded` and clears the fetch lease: extraction
+requires a downloaded page, but does not itself establish completed processing.
+From a terminal status it adds graph data without changing that status. Receiving
+`page.processed` or a final failure first must not discard useful links. Older
+attempts still cannot admit links. Source depth plus one, scope, and admission
+limits remain authoritative; all links, admissions, outgoing work, and the event
+marker commit in one transaction.
+
+### Consumer failures and background readiness
+
+Consumer processing has at most three attempts per delivery, with bounded
+exponential delay between temporary failures. These are delivery attempts, never
+fetch attempts. Invalid contracts and permanent processing errors go directly to
+the event-specific DLQ; exhausted temporary errors go there too. Frontier explicitly
+publishes the original body to `crawler.dlx` as a persistent mandatory message on
+a channel with publisher confirms and return exceptions enabled. It acknowledges
+the original only after `Basic.Ack` confirms the transfer. Broker rejection through
+the default classic-queue DLX alone is not treated as a confirmed transfer.
+If transfer fails, the original is not acknowledged; it is requeued after a bounded
+delay. Transport recovery may continue while the broker is unavailable, without
+allocating fetch attempts or discarding the original. A crash between confirmation
+and original acknowledgement may duplicate a DLQ entry, which is acceptable.
+
+Outbox and lease-recovery loops retry temporary database/broker failures with
+exponential delay capped at 30 seconds, until shutdown. Readiness requires a
+successful database probe, a connected RabbitMQ channel with all six live consumer
+tags, and healthy publisher, recovery, and subscription-monitor workers. Repeated
+temporary failures keep readiness unsuccessful until recovery. Unexpected task
+failure is surfaced and never reported healthy. Shutdown signals workers, cancels
+the monitor and consumer registrations, then allows a bounded worker drain before
+cancelling remaining tasks. Consumer cancellation is sequential, so this is not a
+single global shutdown deadline.
+
+### Long URL identity storage
+
+The complete canonical URL remains authoritative. PostgreSQL stores
+`normalized_url VARCHAR(16384)` and `url_digest BYTEA NOT NULL`, with
+`UNIQUE (crawl_id, url_digest)`, a 32-byte length check, and a consistency check
+against `sha256(convert_to(normalized_url, 'UTF8'))`. A `BEFORE INSERT OR UPDATE`
+trigger always derives the digest in PostgreSQL. It is not a generated column:
+PostgreSQL 17 marks `convert_to` STABLE rather than IMMUTABLE.
+
+On a digest conflict Frontier reads the stored full URL under its crawl lock.
+Equal strings are duplicates; different strings raise an explicit identity
+collision error and roll back, never merging records or silently skipping a URL.
+Thus concurrent inserts cannot create duplicate URL identities or duplicate fetch
+work. The storage ceiling supports the existing policy range; the configured URL
+limit (4096 by default) still applies to input and canonical representations.
+
+The initial schema creates this identity representation directly. Any future
+migration that changes URL identity must preflight existing lengths, digest
+conflicts, and canonicalization merges, then abort with diagnostics rather than
+deleting data. Existing IDs, edges, attempts, and pending events must survive
+such a migration. Ambiguous identity merges require an explicit data-resolution
+procedure, not automatic deduplication.
 
 Publishing a message after a successful database commit is not sufficient. A process can stop after the commit and before publishing, leaving a URL or extracted link permanently undispatched.
 
@@ -458,14 +568,15 @@ Build the source of truth for URL scheduling.
 
 1. Add SQLAlchemy models and Alembic migrations for crawls, URLs, links, fetch leases, outbox events, and processed events.
 2. Implement URL normalization, allowed-host policy, and validation tests first.
-3. Implement crawl creation and URL admission.
-4. Add the unique URL constraint and tests for duplicate links and cyclic graphs.
-5. Write a `fetch.url` outbox event in the same transaction as every admitted URL.
-6. Add the outbox publisher with RabbitMQ publisher confirms.
-7. Consume `fetch.started`, `page.fetched`, `fetch.retry_requested`, `page.processed`, and `page.failed` idempotently. `page.fetched` releases the fetch lease and enters `downloaded`. Only Frontier allocates a new `fetch_attempt` and schedules the next primary `fetch.url` event.
-8. Implement expired-lease recovery through the retry-delay queue.
-9. Add depth, page-count, and per-origin limits.
-10. Expose internal crawl creation and status endpoints.
+3. Configure Frontier runtime PostgreSQL access: require `DATABASE_URL`, create the process-owned async engine and bounded connection pool, create `async_sessionmaker` with `expire_on_commit=False`, and dispose the engine through the FastAPI lifespan. Provide one session per internal HTTP request and a PostgreSQL readiness check. Alembic continues to use the same `DATABASE_URL` independently of the running application.
+4. Implement crawl creation and URL admission.
+5. Add the unique URL constraint and tests for duplicate links and cyclic graphs.
+6. Write a `fetch.url` outbox event in the same transaction as every admitted URL.
+7. Add the outbox publisher with RabbitMQ publisher confirms.
+8. Consume `fetch.started`, `page.fetched`, `fetch.retry_requested`, `page.processed`, and `page.failed` idempotently. `page.fetched` releases the fetch lease and enters `downloaded`. Only Frontier allocates a new `fetch_attempt` and schedules the next primary `fetch.url` event.
+9. Implement expired-lease recovery through the retry-delay queue.
+10. Add depth, page-count, and per-origin limits.
+11. Expose internal crawl creation and status endpoints.
 
 ### 3. Fetcher Service
 
@@ -526,6 +637,9 @@ All runtime configuration is supplied through environment variables. Secrets are
 | Variable | Used by | Purpose |
 |---|---|---|
 | `DATABASE_URL` | Frontier, Content | Service-specific PostgreSQL connection string |
+| `DATABASE_POOL_SIZE` | Frontier, Content | Persistent connections per service process; default `5` |
+| `DATABASE_MAX_OVERFLOW` | Frontier, Content | Temporary connections beyond the pool size; default `10` |
+| `DATABASE_POOL_TIMEOUT_SECONDS` | Frontier, Content | Maximum wait for an available database connection; default `30` |
 | `RABBITMQ_URL` | Frontier, Fetcher, Content | RabbitMQ connection string |
 | `ELASTICSEARCH_URL` | Content | Elasticsearch connection string |
 | `REDIS_URL` | Fetcher | Shared origin policy state |
@@ -541,12 +655,14 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size; default `5 MiB`, maximum `50 MiB` |
 | `ORIGIN_REQUESTS_PER_SECOND` | Fetcher | Per-origin request rate |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |
-| `MAX_CRAWL_DEPTH` | Frontier | Maximum link depth from a seed |
-| `MAX_URLS_PER_CRAWL` | Frontier | Crawl size limit |
+| `MAX_CRAWL_DEPTH` | Frontier | Maximum URL depth from a seed (seeds are depth `0`); URLs at the limit are admitted and those beyond it are skipped; default `5` |
+| `MAX_URLS_PER_CRAWL` | Frontier | Maximum non-skipped URLs per crawl; default `10,000` |
+| `MAX_URLS_PER_ORIGIN` | Frontier | Maximum non-skipped URLs per origin in one crawl; default `1,000` |
 | `MAX_FETCH_ATTEMPTS` | Frontier | Maximum number of fetch attempts per URL; default `3` |
 | `FETCH_LEASE_SECONDS` | Frontier | Lease duration after `fetch.started`; default `120` |
+| `OUTBOX_POLL_INTERVAL_SECONDS` | Frontier | Interval for polling unpublished outbox events; default `1` |
+| `LEASE_RECOVERY_POLL_INTERVAL_SECONDS` | Frontier | Interval for recovering expired fetch leases; default `5` |
 | `MAX_URL_LENGTH` | Frontier | Maximum accepted URL length; default `4096` |
-| `ADDITIONAL_ALLOWED_HOSTS` | Frontier | Optional explicit host allowlist in addition to seed hosts |
 
 ## Acceptance Criteria
 
@@ -554,7 +670,7 @@ All runtime configuration is supplied through environment variables. Secrets are
 - Each service has an independent lock file and virtual environment.
 - A seed URL creates a fetch task.
 - A page with a cyclic link graph terminates without duplicate fetches.
-- URLs outside the seed-host policy are recorded but never fetched.
+- New URLs outside the persisted per-crawl host policy or admission limits are not stored and never create a fetch task or graph edge; duplicates of admitted nodes preserve graph edges.
 - A Fetcher crash after `fetch.started` is recovered after its lease expires, and stale results from the expired fetch attempt do not change the current URL state.
 - Extracted links appear as graph edges in `frontier_db`.
 - Extracted keywords appear in `content_db`.

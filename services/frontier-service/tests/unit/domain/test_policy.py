@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from crawler_frontier.policy import FrontierPolicy, can_retry
-from crawler_frontier.state_machine import (
+from crawler_frontier.domain.policy import FrontierPolicy, can_retry
+from crawler_frontier.domain.state_machine import (
     InvalidStateTransition,
     UrlStatus,
     is_lease_expired,
@@ -19,6 +19,9 @@ def test_policy_uses_bounded_defaults() -> None:
     assert policy.max_fetch_attempts == 3
     assert policy.fetch_lease_seconds == 120
     assert policy.max_url_length == 4_096
+    assert policy.max_crawl_depth == 5
+    assert policy.max_urls_per_crawl == 10_000
+    assert policy.max_urls_per_origin == 1_000
 
 
 def test_policy_rejects_invalid_retry_limit() -> None:
@@ -51,6 +54,9 @@ def test_lease_is_expired_at_its_deadline() -> None:
     ("current", "target"),
     [
         (UrlStatus.QUEUED, UrlStatus.FETCHING),
+        (UrlStatus.QUEUED, UrlStatus.DOWNLOADED),
+        (UrlStatus.QUEUED, UrlStatus.FETCHED),
+        (UrlStatus.QUEUED, UrlStatus.FAILED),
         (UrlStatus.QUEUED, UrlStatus.SKIPPED),
         (UrlStatus.FETCHING, UrlStatus.QUEUED),
         (UrlStatus.FETCHING, UrlStatus.DOWNLOADED),

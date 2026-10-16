@@ -1,0 +1,10 @@
+# Local integration tests only: make loopback-published AMQP ports reachable.
+# Usage: docker compose -f docker-compose.yml -f infrastructure/rabbitmq/compose.test-host.yml up -d rabbitmq rabbitmq-init
+services:
+  rabbitmq:
+    networks:
+      - rabbitmq
+      - rabbitmq_test_host
+
+networks:
+  rabbitmq_test_host:
