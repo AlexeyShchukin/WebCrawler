@@ -27,6 +27,7 @@
 - Message consumers must be idempotent.
 - Use a transactional outbox for events derived from PostgreSQL state changes.
 - Keep untrusted URL and HTML handling defensive: validate URLs, enforce response limits, and retain SSRF protections.
+- Use `superpowers:subagent-driven-development` only for multi-step implementation plans with independently reviewable tasks or work expected to span sessions. For small, bounded changes, use the smallest applicable Superpowers workflow without creating SDD-specific workspace artifacts.
 
 ## Verification
 

@@ -2,6 +2,7 @@ name: webcrawler
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: postgres
@@ -23,6 +24,7 @@ services:
       - content_postgres
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:4-management
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
@@ -60,6 +62,7 @@ services:
       - rabbitmq
 
   redis:
+    restart: unless-stopped
     image: redis:8-alpine
     command:
       - sh
@@ -80,6 +83,7 @@ services:
       - fetcher_redis
 
   minio:
+    restart: unless-stopped
     image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
     command: server /data --console-address ":9001"
     environment:
@@ -117,6 +121,7 @@ services:
       - object_storage
 
   elasticsearch:
+    restart: unless-stopped
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
     environment:
       discovery.type: single-node
@@ -136,6 +141,7 @@ services:
 
   api:
     profiles: ["services"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/api-service/Dockerfile
@@ -173,6 +179,7 @@ services:
 
   frontier:
     profiles: ["services"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/frontier-service/Dockerfile
@@ -200,6 +207,12 @@ services:
         condition: service_completed_successfully
       rabbitmq-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       - api_frontier
       - frontier_postgres
@@ -207,6 +220,7 @@ services:
 
   fetcher:
     profiles: ["services"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/fetcher-service/Dockerfile
@@ -224,7 +238,10 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      frontier:
+        condition: service_healthy
     networks:
+      - api_frontier
       - rabbitmq
       - fetcher_redis
       - object_storage
@@ -232,6 +249,7 @@ services:
 
   content:
     profiles: ["services"]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: services/content-service/Dockerfile

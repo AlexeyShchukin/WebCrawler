@@ -25,6 +25,8 @@ RUN groupadd --gid 10001 crawler \
 
 WORKDIR /app/services/frontier-service
 COPY --from=builder --chown=crawler:crawler /app/services/frontier-service/.venv .venv
+COPY --from=builder --chown=crawler:crawler /app/services/frontier-service/alembic.ini .
+COPY --from=builder --chown=crawler:crawler /app/services/frontier-service/alembic alembic
 
 USER crawler
 
