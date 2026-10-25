@@ -1,11 +1,8 @@
 """Idempotent Frontier handlers for crawler pipeline events."""
 
-from datetime import UTC, datetime
-
 from crawler_contracts import (
     FailureStage,
     FetchRetryRequestedEvent,
-    FetchStartedEvent,
     LinksExtractedEvent,
     PageFailedEvent,
     PageFetchedEvent,
@@ -20,7 +17,7 @@ from crawler_frontier.application.crawl_service import (
     _fetch_url_outbox_event,
 )
 from crawler_frontier.domain.policy import FrontierPolicy, can_retry
-from crawler_frontier.domain.state_machine import UrlStatus, lease_expires_at
+from crawler_frontier.domain.state_machine import UrlStatus
 from crawler_frontier.models import Crawl, CrawlUrl, ProcessedEvent
 
 
@@ -32,19 +29,10 @@ class FrontierEventHandler:
     def __init__(self, session: AsyncSession, policy: FrontierPolicy) -> None:
         self.session, self.policy = session, policy
 
-    async def handle_fetch_started(self, event: FetchStartedEvent, consumer_name: str) -> None:
-        await self._handle(event, consumer_name)
-
-    async def handle_page_fetched(self, event: PageFetchedEvent, consumer_name: str) -> None:
-        await self._handle(event, consumer_name)
-
     async def handle_page_processed(self, event: PageProcessedEvent, consumer_name: str) -> None:
         await self._handle(event, consumer_name)
 
     async def handle_page_failed(self, event: PageFailedEvent, consumer_name: str) -> None:
-        await self._handle(event, consumer_name)
-
-    async def handle_fetch_retry_requested(self, event: FetchRetryRequestedEvent, consumer_name: str) -> None:
         await self._handle(event, consumer_name)
 
     async def handle_links_extracted(self, event: LinksExtractedEvent, consumer_name: str) -> None:
@@ -54,9 +42,10 @@ class FrontierEventHandler:
         async with self.session.begin():
             url = await self._claim(event, consumer_name)
             if url is not None:
-                await self._apply(url, event)
+                await self.apply_current_attempt_event(url, event)
 
-    async def _apply(self, url: CrawlUrl, event) -> None:
+    async def apply_current_attempt_event(self, url: CrawlUrl, event) -> None:
+        """Apply a validated current-attempt event within the caller's transaction."""
         if url.fetch_attempt != event.fetch_attempt:
             return
         if isinstance(event, LinksExtractedEvent):
@@ -64,18 +53,9 @@ class FrontierEventHandler:
                 if url.status in {UrlStatus.QUEUED, UrlStatus.FETCHING}:
                     url.status, url.lease_until = UrlStatus.DOWNLOADED, None
                 await CrawlService(self.session, self.policy)._admit_extracted_links(url, event.links)
-        elif isinstance(event, FetchStartedEvent):
-            if url.status is UrlStatus.QUEUED:
-                url.status = UrlStatus.FETCHING
-                url.lease_until = lease_expires_at(
-                    now=datetime.now(UTC),
-                    lease_seconds=self.policy.fetch_lease_seconds,
-                )
-
         elif isinstance(event, PageFetchedEvent):
             if url.status in {UrlStatus.QUEUED, UrlStatus.FETCHING}:
                 url.status, url.lease_until = UrlStatus.DOWNLOADED, None
-
         elif isinstance(event, PageProcessedEvent):
             if url.status in {UrlStatus.QUEUED, UrlStatus.FETCHING, UrlStatus.DOWNLOADED}:
                 url.status, url.lease_until = UrlStatus.FETCHED, None
@@ -106,7 +86,7 @@ class FrontierEventHandler:
                 url=url.normalized_url,
                 depth=url.depth,
                 exchange_name="crawler.retry",
-                routing_key=_retry_routing_key(event.suggested_delay_seconds)
+                routing_key=_retry_routing_key(event.suggested_delay_seconds),
             ))
 
     async def _claim(self, event, consumer_name: str) -> CrawlUrl | None:
@@ -144,7 +124,10 @@ class FrontierEventHandler:
         return await self.session.scalar(statement) is not None
 
 def _retry_routing_key(seconds: int) -> str:
-    if seconds <= 5: return "fetch.url.retry.5s"
-    if seconds <= 30: return "fetch.url.retry.30s"
-    if seconds <= 120: return "fetch.url.retry.2m"
+    if seconds <= 5:
+        return "fetch.url.retry.5s"
+    if seconds <= 30:
+        return "fetch.url.retry.30s"
+    if seconds <= 120:
+        return "fetch.url.retry.2m"
     return "fetch.url.retry.10m"

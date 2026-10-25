@@ -60,6 +60,10 @@ class CrawlUrl(Base):
         UniqueConstraint("crawl_id", "id", name="uq_crawl_urls_crawl_id_id"),
         CheckConstraint("depth >= 0", name="ck_crawl_urls_depth_nonnegative"),
         CheckConstraint("fetch_attempt >= 1", name="ck_crawl_urls_fetch_attempt_positive"),
+        CheckConstraint(
+            "status <> 'fetching' OR (lease_until IS NOT NULL AND lease_owner_token IS NOT NULL)",
+            name="ck_crawl_urls_fetching_requires_lease_owner",
+        ),
         Index(
             "ix_crawl_urls_ready",
             "crawl_id",
@@ -102,6 +106,8 @@ class CrawlUrl(Base):
         server_default=text("1"),
     )
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner_token: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    lease_submission_event_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     last_error_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

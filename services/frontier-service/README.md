@@ -38,7 +38,8 @@ databases. Broker scenarios use private test queues and exchanges.
 
 `/health` returns 503 until PostgreSQL, RabbitMQ subscriptions and both background
 workers are ready. Repeated infrastructure failures make readiness unsuccessful
-until recovery; permanent worker failures remain unhealthy. Current-attempt
-results apply without waiting for `fetch.started`; late starts cannot regress
-downloaded or terminal URLs. Extracted links preserve graph data regardless of
-result ordering and release any fetch lease without claiming Content completion.
+until recovery; permanent worker failures remain unhealthy. Fetcher obtains a
+lease through HTTP `claim`, extends it with `renew`, and finalizes it with
+owner-token checked `submit`; Frontier writes the accepted result through its
+transactional outbox. Extracted links preserve graph data regardless of result
+ordering and release any fetch lease without claiming Content completion.

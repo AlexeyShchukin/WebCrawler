@@ -8,13 +8,16 @@ from pydantic import ValidationError
 from crawler_contracts.events import (
     CrawlerEvent,
     FetchRetryRequestedEvent,
-    FetchStartedEvent,
     FetchUrlEvent,
     LinksExtractedEvent,
     PageFailedEvent,
     PageFetchedEvent,
     PageProcessedEvent,
 )
+
+
+class EnvelopeEvent(CrawlerEvent):
+    """Test-only concrete envelope model."""
 
 
 def event_envelope() -> dict[str, object]:
@@ -34,7 +37,7 @@ def fetch_envelope() -> dict[str, object]:
     ("event_type", "payload"),
     [
         (FetchUrlEvent, {"url": "https://example.com/", "depth": 0}),
-        (FetchStartedEvent, {}),
+        (EnvelopeEvent, {}),
         (
             FetchRetryRequestedEvent,
             {
@@ -116,9 +119,9 @@ def test_event_rejects_non_utc_timestamp() -> None:
         )
 
 
-def test_fetch_started_event_rejects_fetcher_lease_configuration() -> None:
+def test_envelope_event_rejects_unknown_configuration() -> None:
     with pytest.raises(ValidationError, match="lease_seconds"):
-        FetchStartedEvent(
+        EnvelopeEvent(
             **fetch_envelope(),
             lease_seconds=60,
         )
@@ -157,12 +160,12 @@ def test_page_fetched_event_rejects_inline_html() -> None:
 
 
 def test_outgoing_defaults_are_preserved_without_regenerating_received_fields():
-    event = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
+    event = EnvelopeEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
     assert event.event_id is not None
     assert event.created_at.utcoffset() == timedelta(0)
     body = event.model_dump_json()
-    first = FetchStartedEvent.from_message_json(body)
-    second = FetchStartedEvent.from_message_json(body)
+    first = EnvelopeEvent.from_message_json(body)
+    second = EnvelopeEvent.from_message_json(body)
     assert first == second == event
 
 
@@ -170,13 +173,13 @@ def test_outgoing_defaults_are_preserved_without_regenerating_received_fields():
     ("event_id",), ("created_at",), ("event_id", "created_at"),
 ])
 def test_repeated_incoming_json_cannot_generate_missing_envelope_fields(missing):
-    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    payload = EnvelopeEvent(**fetch_envelope()).model_dump(mode="json")
     for field in missing:
         payload.pop(field)
     body = json.dumps(payload)
     for _ in range(2):
         with pytest.raises(ValueError, match="event_id|created_at"):
-            FetchStartedEvent.from_message_json(body)
+            EnvelopeEvent.from_message_json(body)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -186,30 +189,30 @@ def test_repeated_incoming_json_cannot_generate_missing_envelope_fields(missing)
     ("created_at", "2026-10-12T12:00:00+03:00"),
 ])
 def test_incoming_envelope_rejects_invalid_identity_or_timestamp(field, value):
-    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    payload = EnvelopeEvent(**fetch_envelope()).model_dump(mode="json")
     payload[field] = value
     with pytest.raises(ValidationError, match=field):
-        FetchStartedEvent.from_message_json(json.dumps(payload))
+        EnvelopeEvent.from_message_json(json.dumps(payload))
 
 
 @pytest.mark.parametrize("field", ["event_id", "created_at"])
 def test_incoming_json_rejects_duplicate_envelope_keys(field):
-    payload = FetchStartedEvent(**fetch_envelope()).model_dump(mode="json")
+    payload = EnvelopeEvent(**fetch_envelope()).model_dump(mode="json")
     body = '{' + json.dumps(field) + ':' + json.dumps(payload[field]) + ',' + json.dumps(payload)[1:]
     with pytest.raises(ValueError, match=field):
-        FetchStartedEvent.from_message_json(body)
+        EnvelopeEvent.from_message_json(body)
 
 
 @pytest.mark.parametrize("body", ["null", "[]", "42", '"event"'])
 def test_incoming_json_requires_an_object(body):
     with pytest.raises(TypeError):
-        FetchStartedEvent.from_message_json(body)
+        EnvelopeEvent.from_message_json(body)
 
 
 def test_equal_timestamps_do_not_merge_different_events():
-    first = FetchStartedEvent(**fetch_envelope())
-    second = FetchStartedEvent(crawl_id=first.crawl_id, url_id=first.url_id,
+    first = EnvelopeEvent(**fetch_envelope())
+    second = EnvelopeEvent(crawl_id=first.crawl_id, url_id=first.url_id,
                                fetch_attempt=1, created_at=first.created_at)
-    restored = [FetchStartedEvent.from_message_json(event.model_dump_json()) for event in (first, second)]
+    restored = [EnvelopeEvent.from_message_json(event.model_dump_json()) for event in (first, second)]
     assert restored[0].created_at == restored[1].created_at
     assert restored[0].event_id != restored[1].event_id

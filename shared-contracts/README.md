@@ -14,18 +14,17 @@ Every event inherits the same immutable envelope:
 - `fetch_attempt`: Frontier-allocated fetch execution attempt number.
 - `created_at`: timezone-aware UTC timestamp.
 
-`fetch_attempt` distinguishes a late result from an earlier fetch execution from the currently scheduled execution for the same `url_id`. A temporary failure before `fetch.started`, such as unavailable Redis origin-policy state, does not increment it.
+`fetch_attempt` distinguishes a late result from an earlier fetch execution from the currently scheduled execution for the same `url_id`. A temporary failure before an HTTP lease claim, such as unavailable Redis origin-policy state, does not increment it.
 
 The package rejects unknown fields. Consumers use `event_id` together with their handler name as the idempotency key in `processed_events`.
 
 | Model | Producer | Purpose                                                       |
 |---|---|---------------------------------------------------------------|
 | `FetchUrlEvent` | Frontier | Schedule an admitted URL for fetching                         |
-| `FetchStartedEvent` | Fetcher | Report the start of a Frontier-allocated fetch attempt       |
-| `FetchRetryRequestedEvent` | Fetcher | Ask Frontier to schedule a retry for a transient fetch-execution failure |
-| `PageFetchedEvent` | Fetcher | Deliver metadata and an object-storage reference for raw HTML |
+| `FetchRetryRequestedEvent` | Frontier outbox | Request a retry after an owner-token checked HTTP submit |
+| `PageFetchedEvent` | Frontier outbox | Deliver metadata and an object-storage reference for raw HTML |
 | `LinksExtractedEvent` | Content | Send discovered links to Frontier                             |
 | `PageProcessedEvent` | Content | Confirm that a page was persisted and indexed                 |
-| `PageFailedEvent` | Fetcher or Content | Report a final pipeline failure                               |
+| `PageFailedEvent` | Frontier outbox or Content | Report a final pipeline failure                               |
 
 Use `model_dump_json()` before publishing. After consuming a message, use the event model's `from_message_json()` method so the incoming envelope must include its explicit `event_id` and `created_at`.

@@ -70,10 +70,6 @@ class FetchUrlEvent(CrawlerEvent):
     depth: Annotated[int, Field(ge=0)]
 
 
-class FetchStartedEvent(CrawlerEvent):
-    """A Fetcher has started the Frontier-allocated fetch attempt."""
-
-
 class PageFetchedEvent(CrawlerEvent):
     """Metadata for a bounded HTML response stored in object storage."""
 

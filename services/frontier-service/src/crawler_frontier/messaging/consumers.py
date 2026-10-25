@@ -7,14 +7,7 @@ from uuid import uuid4
 
 from aio_pika import DeliveryMode, Message
 from aio_pika.abc import AbstractExchange, AbstractIncomingMessage
-from crawler_contracts import (
-    FetchRetryRequestedEvent,
-    FetchStartedEvent,
-    LinksExtractedEvent,
-    PageFailedEvent,
-    PageFetchedEvent,
-    PageProcessedEvent,
-)
+from crawler_contracts import LinksExtractedEvent, PageFailedEvent, PageProcessedEvent
 from pamqp.commands import Basic
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -84,13 +77,6 @@ def consumer_callback(
 
 CONSUMERS = {
     "links.extracted.queue": ("links.extracted", LinksExtractedEvent, "handle_links_extracted"),
-    "fetch.started.queue": ("fetch.started", FetchStartedEvent, "handle_fetch_started"),
-    "page.fetched.frontier.queue": ("page.fetched", PageFetchedEvent, "handle_page_fetched"),
-    "fetch.retry_requested.queue": (
-        "fetch.retry_requested",
-        FetchRetryRequestedEvent,
-        "handle_fetch_retry_requested",
-    ),
     "page.processed.queue": ("page.processed", PageProcessedEvent, "handle_page_processed"),
     "page.failed.queue": ("page.failed", PageFailedEvent, "handle_page_failed"),
 }
