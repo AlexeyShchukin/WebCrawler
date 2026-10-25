@@ -77,7 +77,7 @@ class MemoryBroker:
     reconnect = RobustConnection.reconnect
 
     def __init__(self):
-        self.tags = {f"required-{index}" for index in range(6)}
+        self.tags = {f"required-{index}" for index in range(3)}
         self.connections = []
         self.sent = asyncio.Queue()
         self._replace_transport()

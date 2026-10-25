@@ -82,7 +82,7 @@ async def test_readiness_does_not_report_failed_dependencies_healthy(monkeypatch
     app.state.database_engine = object()
     app.state.broker_connection = SimpleNamespace(is_closed=False, connected=connected)
     app.state.broker_channel = SimpleNamespace(is_closed=False, ready=channel_ready)
-    tags = {f"consumer-{index}" for index in range(6)}
+    tags = {f"consumer-{index}" for index in range(3)}
     underlay = SimpleNamespace(is_closed=False, consumers=dict.fromkeys(tags))
 
     async def get_underlay_channel():
@@ -98,7 +98,9 @@ async def test_readiness_does_not_report_failed_dependencies_healthy(monkeypatch
         pass
 
     monkeypatch.setattr(application, "database_healthcheck", database_ok)
-    endpoint = next(route.endpoint for route in app.routes if route.path == "/health")
+    endpoint = next(
+        route.endpoint for route in app.routes if getattr(route, "path", None) == "/health"
+    )
     try:
         assert await endpoint() == {"status": "ok"}
         if failure == "worker_iteration":

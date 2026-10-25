@@ -21,6 +21,8 @@ def test_crawl_url_schema_enforces_one_normalized_url_per_crawl() -> None:
         "status",
         "fetch_attempt",
         "lease_until",
+        "lease_owner_token",
+        "lease_submission_event_id",
         "last_error_category",
         "last_error_detail",
         "created_at",

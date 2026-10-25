@@ -1,12 +1,15 @@
 import json
 from uuid import uuid4
 
-from crawler_contracts import FetchStartedEvent
+from crawler_contracts import FetchRetryRequestedEvent
 
 
 def malformed_event_body(kind):
     """Build synthetic envelopes without relying on the inbound parser."""
-    payload = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1).model_dump(mode="json")
+    payload = FetchRetryRequestedEvent(
+        crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1,
+        category="timeout", detail="test", suggested_delay_seconds=1,
+    ).model_dump(mode="json")
     if kind == "invalid_json":
         return b"invalid-json"
     if kind in {"missing_event_id", "missing_created_at", "missing_both"}:

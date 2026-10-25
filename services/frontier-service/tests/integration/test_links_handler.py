@@ -1,5 +1,6 @@
 """Frontier owns admission of Content's extracted links."""
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from crawler_contracts import LinksExtractedEvent
@@ -29,6 +30,7 @@ async def test_links_are_subscribed_admitted_and_deduplicated(session_factory, i
         source.status = initial
         if initial is UrlStatus.FETCHING:
             source.lease_until = datetime.now(UTC) - timedelta(seconds=1)
+            source.lease_owner_token = uuid4()
         source_id = source.id
     event = LinksExtractedEvent(crawl_id=created.crawl_id, url_id=source_id, fetch_attempt=1, links=(
         "https://example.test/a", "https://example.test/a#fragment", "https://docs.example.test/b",

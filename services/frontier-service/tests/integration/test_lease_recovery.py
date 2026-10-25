@@ -33,6 +33,7 @@ async def _create_fetching_url(
             status=UrlStatus.FETCHING,
             fetch_attempt=fetch_attempt,
             lease_until=lease_until,
+            lease_owner_token=uuid4(),
         )
         session.add(url)
         await session.flush()

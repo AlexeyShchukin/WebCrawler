@@ -1,11 +1,15 @@
 from uuid import uuid4
 
 import pytest
-from crawler_contracts import FetchStartedEvent
+from crawler_contracts import CrawlerEvent
 
 from crawler_frontier.domain.policy import FrontierPolicy
 from crawler_frontier.messaging import consumers
 from tests.support.event_payloads import malformed_event_body
+
+
+class _TestEvent(CrawlerEvent):
+    """Minimal event model used to exercise generic consumer delivery logic."""
 
 
 @pytest.mark.asyncio
@@ -15,7 +19,7 @@ async def test_consumer_settles_failures_only_after_confirmed_dlq(monkeypatch, p
 
     from pamqp.commands import Basic
 
-    event = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
+    event = _TestEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
     effects = []
 
     @asynccontextmanager
@@ -26,7 +30,7 @@ async def test_consumer_settles_failures_only_after_confirmed_dlq(monkeypatch, p
         def __init__(self, *args):
             pass
 
-        async def handle_fetch_started(self, *args):
+        async def handle_test_event(self, *args):
             effects.append("attempt")
             if permanent == "constraint":
                 from sqlalchemy.exc import IntegrityError
@@ -37,7 +41,7 @@ async def test_consumer_settles_failures_only_after_confirmed_dlq(monkeypatch, p
         async def publish(self, message, **kwargs):
             effects.append("dlq")
             assert kwargs["mandatory"] is True
-            assert kwargs["routing_key"] == "fetch.started"
+            assert kwargs["routing_key"] == "test.event"
             assert message.body == incoming.body
             assert message.expiration is None
             return Basic.Ack(delivery_tag=1)
@@ -54,7 +58,7 @@ async def test_consumer_settles_failures_only_after_confirmed_dlq(monkeypatch, p
 
     monkeypatch.setattr(consumers, "FrontierEventHandler", Handler)
     callback = consumers.consumer_callback(
-        FetchStartedEvent, "fetch.started", "handle_fetch_started",
+        _TestEvent, "test.event", "handle_test_event",
         session_factory, FrontierPolicy(),
         dead_letter_exchange=Exchange(),
     )
@@ -68,16 +72,16 @@ async def test_consumer_settles_failures_only_after_confirmed_dlq(monkeypatch, p
 async def test_callback_passes_registered_consumer_id_to_the_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    event = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
-    handled: list[tuple[FetchStartedEvent, str]] = []
+    event = _TestEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
+    handled: list[tuple[_TestEvent, str]] = []
 
     class RecordingHandler:
         def __init__(self, session, policy) -> None:
             pass
 
-        async def handle_fetch_started(
+        async def handle_test_event(
             self,
-            received_event: FetchStartedEvent,
+            received_event: _TestEvent,
             consumer_name: str,
         ) -> None:
             handled.append((received_event, consumer_name))
@@ -98,9 +102,9 @@ async def test_callback_passes_registered_consumer_id_to_the_handler(
 
     monkeypatch.setattr(consumers, "FrontierEventHandler", RecordingHandler)
     callback = consumers.consumer_callback(
-        FetchStartedEvent,
-        "fetch.started",
-        "handle_fetch_started",
+        _TestEvent,
+        "test.event",
+        "handle_test_event",
         lambda: FakeSession(),
         FrontierPolicy(),
     )
@@ -108,7 +112,7 @@ async def test_callback_passes_registered_consumer_id_to_the_handler(
 
     await callback(message)
 
-    assert handled == [(event, "fetch.started")]
+    assert handled == [(event, "test.event")]
     assert message.acknowledged is True
 
 
@@ -136,13 +140,13 @@ async def test_repeated_invalid_envelope_goes_to_dlq_without_creating_events(mon
         def __init__(self, *args):
             pass
 
-        async def handle_fetch_started(self, event, name):
+        async def handle_test_event(self, event, name):
             handled.append(event)
 
     class Exchange:
         async def publish(self, message, **kwargs):
             assert message.body == body
-            assert kwargs == {"routing_key": "fetch.started", "mandatory": True, "timeout": 5.0}
+            assert kwargs == {"routing_key": "test.event", "mandatory": True, "timeout": 5.0}
             effects.append("dlq")
             return Basic.Ack(delivery_tag=1)
 
@@ -160,7 +164,7 @@ async def test_repeated_invalid_envelope_goes_to_dlq_without_creating_events(mon
 
     monkeypatch.setattr(consumers, "FrontierEventHandler", Handler)
     callback = consumers.consumer_callback(
-        FetchStartedEvent, "fetch.started", "handle_fetch_started", Session,
+        _TestEvent, "test.event", "handle_test_event", Session,
         FrontierPolicy(), dead_letter_exchange=Exchange(),
     )
     await callback(Message())
@@ -205,7 +209,7 @@ async def test_invalid_envelope_is_not_acknowledged_when_dlq_handoff_fails(monke
 
     monkeypatch.setattr(consumers, "sleep", delay)
     callback = consumers.consumer_callback(
-        FetchStartedEvent, "fetch.started", "handle_fetch_started", unexpected_session,
+        _TestEvent, "test.event", "handle_test_event", unexpected_session,
         FrontierPolicy(), dead_letter_exchange=Exchange(),
     )
     await callback(Message())
@@ -216,7 +220,7 @@ async def test_invalid_envelope_is_not_acknowledged_when_dlq_handoff_fails(monke
 async def test_valid_redelivery_preserves_the_received_identity_and_timestamp(monkeypatch):
     from contextlib import asynccontextmanager
 
-    event = FetchStartedEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
+    event = _TestEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1)
     received, acknowledgements = [], []
 
     @asynccontextmanager
@@ -227,7 +231,7 @@ async def test_valid_redelivery_preserves_the_received_identity_and_timestamp(mo
         def __init__(self, *args):
             pass
 
-        async def handle_fetch_started(self, incoming, name):
+        async def handle_test_event(self, incoming, name):
             received.append((incoming.event_id, incoming.created_at))
 
     class Message:
@@ -238,7 +242,7 @@ async def test_valid_redelivery_preserves_the_received_identity_and_timestamp(mo
 
     monkeypatch.setattr(consumers, "FrontierEventHandler", Handler)
     callback = consumers.consumer_callback(
-        FetchStartedEvent, "fetch.started", "handle_fetch_started", sessions, FrontierPolicy(),
+        _TestEvent, "test.event", "handle_test_event", sessions, FrontierPolicy(),
     )
     await callback(Message())
     await callback(Message())

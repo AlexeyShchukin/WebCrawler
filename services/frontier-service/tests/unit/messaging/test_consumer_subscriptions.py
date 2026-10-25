@@ -156,7 +156,9 @@ async def subscription_app(monkeypatch):
     # Shorten polling only; preserve real client consume/cancel/restore behavior.
     monkeypatch.setattr(application, "_CONSUMER_POLL_INTERVAL_SECONDS", 0.001, raising=False)
     app = application.create_app()
-    health = next(route.endpoint for route in app.routes if route.path == "/health")
+    health = next(
+        route.endpoint for route in app.routes if getattr(route, "path", None) == "/health"
+    )
     async with application.lifespan(app):
         try:
             yield app, connection, channel, health
@@ -166,10 +168,15 @@ async def subscription_app(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_all_six_consumers_are_registered_and_ready(subscription_app):
+async def test_only_content_result_consumers_are_registered_and_ready(subscription_app):
     app, connection, channel, health = subscription_app
-    assert len(channel.queues) == len(CONSUMERS) == 6
-    assert len(channel.underlay.consumers) == 6
+    assert set(CONSUMERS) == {
+        "links.extracted.queue",
+        "page.processed.queue",
+        "page.failed.queue",
+    }
+    assert len(channel.queues) == len(CONSUMERS) == 3
+    assert len(channel.underlay.consumers) == 3
     assert await health() == {"status": "ok"}
     assert connection.reconnect_calls == 0
     assert all(not task.done() for task in app.state.worker_tasks)
@@ -209,7 +216,7 @@ async def test_recovery_errors_stay_unready_and_retry_without_duplicate_consumer
         await health()
     assert caught.value.status_code == 503
     await until(lambda: connection.reconnect_calls == 3)
-    assert len(channel.underlay.consumers) == 5
+    assert len(channel.underlay.consumers) == 2
     assert all(not task.done() for task in app.state.worker_tasks)
     with pytest.raises(HTTPException) as caught:
         await health()

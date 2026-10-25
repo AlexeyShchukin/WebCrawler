@@ -1,4 +1,4 @@
-"""Frontier's squashed initial-schema migration regressions."""
+"""Frontier schema-migration regressions."""
 
 import asyncio
 import hashlib
@@ -14,7 +14,7 @@ from crawler_frontier.application.crawl_service import CrawlService
 from crawler_frontier.domain.policy import FrontierPolicy
 from crawler_frontier.models import Base, CrawlUrl
 
-INITIAL_REVISION = "0001_frontier_initial_schema"
+CURRENT_REVISION = "0001_frontier_initial_schema"
 
 
 async def migrate(action, revision: str) -> None:
@@ -27,7 +27,7 @@ async def migrate(action, revision: str) -> None:
 async def test_initial_schema_upgrade_creates_the_current_frontier_contract(session_factory) -> None:
     """A new database has the complete final schema after upgrade head."""
     async with session_factory() as session:
-        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == INITIAL_REVISION
+        assert await session.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_REVISION
         tables = set(await session.scalars(text(
             "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
         )))
@@ -54,6 +54,7 @@ async def test_initial_schema_upgrade_creates_the_current_frontier_contract(sess
             "ck_crawl_urls_digest_matches",
             "ck_crawl_urls_depth_nonnegative",
             "ck_crawl_urls_fetch_attempt_positive",
+            "ck_crawl_urls_fetching_requires_lease_owner",
         } <= constraints
         defaults = dict((await session.execute(text(
             "SELECT column_name, column_default FROM information_schema.columns "
@@ -97,6 +98,6 @@ async def test_initial_schema_trigger_derives_digest_and_base_round_trip(session
             assert await session.scalar(text("SELECT to_regtype('public.url_status')")) is None
         await migrate(command.upgrade, "head")
         async with session_factory() as session:
-            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == INITIAL_REVISION
+            assert await session.scalar(text("SELECT version_num FROM alembic_version")) == CURRENT_REVISION
     finally:
         await migrate(command.upgrade, "head")

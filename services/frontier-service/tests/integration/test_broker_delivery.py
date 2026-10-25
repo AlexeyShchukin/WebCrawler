@@ -7,7 +7,7 @@ from uuid import uuid4
 import aio_pika
 import pytest
 import pytest_asyncio
-from crawler_contracts import FetchStartedEvent
+from crawler_contracts import CrawlerEvent
 from dotenv import load_dotenv
 
 from crawler_frontier.domain.policy import FrontierPolicy
@@ -17,6 +17,10 @@ from crawler_frontier.migration_settings import LOCAL_ENV_FILE
 from crawler_frontier.models import OutboxEvent
 from tests.integration.helpers import _create_pending_event
 from tests.support.event_payloads import malformed_event_body
+
+
+class _TestEvent(CrawlerEvent):
+    """Minimal event model used to exercise generic broker delivery logic."""
 
 
 @pytest_asyncio.fixture
@@ -55,12 +59,12 @@ async def test_invalid_delivery_is_retained_until_dlq_confirm(broker_channel, ro
 
     try:
         if routed:
-            await dlq.bind(exchange, "page.fetched.frontier")
+            await dlq.bind(exchange, "test.event")
         await channel.default_exchange.publish(aio_pika.Message(body), source.name)
         incoming = await source.get(timeout=3)
         callback = consumer_callback(
-            FetchStartedEvent, "page.fetched", "handle_fetch_started", unexpected_session, FrontierPolicy(),
-            dead_letter_exchange=exchange, dead_letter_routing_key="page.fetched.frontier",
+            _TestEvent, "page.fetched", "handle_test_event", unexpected_session, FrontierPolicy(),
+            dead_letter_exchange=exchange, dead_letter_routing_key="test.event",
         )
         await callback(incoming)
         assert sessions == []
@@ -94,7 +98,7 @@ async def test_malformed_redelivery_reaches_dlq_once_its_route_recovers(broker_c
         raise AssertionError("Invalid delivery must not open a DB session")
 
     callback = consumer_callback(
-        FetchStartedEvent, "fetch.started", "handle_fetch_started", unexpected_session,
+        _TestEvent, "test.event", "handle_test_event", unexpected_session,
         FrontierPolicy(), dead_letter_exchange=exchange,
     )
     try:
@@ -105,7 +109,7 @@ async def test_malformed_redelivery_reaches_dlq_once_its_route_recovers(broker_c
 
         redelivery = await source.get(timeout=3)
         assert redelivery.redelivered and redelivery.body == body
-        await dlq.bind(exchange, "fetch.started")
+        await dlq.bind(exchange, "test.event")
         await callback(redelivery)
 
         retained = await dlq.get(timeout=3)

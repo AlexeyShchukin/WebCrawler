@@ -57,6 +57,7 @@ class LeaseRecovery:
             )
             for url in expired_urls:
                 url.lease_until = None
+                url.lease_owner_token = None
                 if not can_retry(fetch_attempt=url.fetch_attempt, policy=self._policy):
                     url.status = UrlStatus.FAILED
                     url.last_error_category = "lease_expired"

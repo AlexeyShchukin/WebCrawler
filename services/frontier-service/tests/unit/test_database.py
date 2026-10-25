@@ -286,7 +286,9 @@ async def test_application_disposes_its_database_engine_on_shutdown(
     monkeypatch.setattr(application, "database_healthcheck", healthy)
 
     app = application.create_app()
-    healthcheck = next(route.endpoint for route in app.routes if route.path == "/health")
+    healthcheck = next(
+        route.endpoint for route in app.routes if getattr(route, "path", None) == "/health"
+    )
 
     async def run_lifecycle():
         async with application.lifespan(app):

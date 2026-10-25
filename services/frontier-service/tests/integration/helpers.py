@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -25,7 +25,9 @@ async def _create_url(
             depth=0,
             status=status,
             fetch_attempt=fetch_attempt,
-            lease_until=lease_until,
+            lease_until=(lease_until or datetime.now(UTC) + timedelta(minutes=1))
+            if status is UrlStatus.FETCHING else lease_until,
+            lease_owner_token=uuid4() if status is UrlStatus.FETCHING else None,
         )
         session.add(url)
         await session.flush()

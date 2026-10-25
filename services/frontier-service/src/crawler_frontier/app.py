@@ -4,33 +4,17 @@ import logging
 from asyncio import Event, create_task, current_task, gather, wait, wait_for
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Annotated
-from uuid import UUID
 
 from aio_pika import ExchangeType, connect_robust
-from crawler_contracts import (
-    FetchRetryRequestedEvent,
-    PageFailedEvent,
-    PageFetchedEvent,
-)
-from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import FastAPI, HTTPException, status
 
-from crawler_frontier.application.crawl_service import CrawlNotFoundError, CrawlService
-from crawler_frontier.application.fetch_lease_service import (
-    FetchLeaseService,
-    LeaseLostError,
-)
+from crawler_frontier.api.router import router as api_router
 from crawler_frontier.database import (
     create_engine,
     create_session_factory,
     database_healthcheck,
-    get_session,
 )
 from crawler_frontier.domain.policy import FrontierPolicy
-from crawler_frontier.domain.url_policy import UrlValidationError
 from crawler_frontier.messaging.consumers import CONSUMERS, consumer_callback
 from crawler_frontier.messaging.outbox import OutboxPublisher
 from crawler_frontier.messaging.subscriptions import ConsumerSubscriptions
@@ -40,49 +24,6 @@ from crawler_frontier.workers.lease_recovery import LeaseRecovery
 logger = logging.getLogger(__name__)
 _CONSUMER_POLL_INTERVAL_SECONDS = 1.0
 
-
-class CreateCrawlRequest(BaseModel):
-    """Input for Frontier's internal crawl-creation API."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    seed_urls: list[str] = Field(min_length=1)
-    additional_allowed_hosts: list[str] = Field(default_factory=list)
-
-
-class CreatedCrawlResponse(BaseModel):
-    """Response returned after Frontier has durably created a crawl."""
-
-    crawl_id: UUID
-
-
-class FetchLeaseRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    crawl_id: UUID
-    url_id: UUID
-    fetch_attempt: int = Field(ge=1)
-    owner_token: UUID
-
-
-class FetchLeaseResponse(BaseModel):
-    owner_token: UUID
-    lease_until: datetime
-
-
-class FetchLeaseRenewRequest(FetchLeaseRequest):
-    pass
-
-
-class FetchLeaseSubmitRequest(FetchLeaseRenewRequest):
-    event: dict[str, object]
-
-
-class CrawlStatusResponse(BaseModel):
-    """The derived Frontier status exposed to the API service."""
-
-    crawl_id: UUID
-    state: str
-    url_counts: dict[str, int]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -186,6 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Create the Frontier internal application without starting a server."""
     app = FastAPI(title="Crawler Frontier Service", lifespan=lifespan)
+    app.include_router(api_router)
 
     @app.get("/health", include_in_schema=False)
     async def healthcheck() -> dict[str, str]:
@@ -217,89 +159,6 @@ def create_app() -> FastAPI:
         ):
             raise HTTPException(status_code=503, detail="Required RabbitMQ consumers are unavailable")
         return {"status": "ok"}
-
-    @app.post("/internal/fetch-leases/claim", response_model=FetchLeaseResponse)
-    async def claim_fetch_lease(request: FetchLeaseRequest, session: Annotated[AsyncSession, Depends(get_session)]):
-        try:
-            grant = await FetchLeaseService(session, app.state.frontier_policy).claim(**request.model_dump())
-        except LeaseLostError as error:
-            raise HTTPException(status_code=409, detail="lease_lost") from error
-        return FetchLeaseResponse(owner_token=grant.owner_token, lease_until=grant.lease_until)
-
-    @app.post("/internal/fetch-leases/renew", response_model=FetchLeaseResponse)
-    async def renew_fetch_lease(request: FetchLeaseRenewRequest, session: Annotated[AsyncSession, Depends(get_session)]):
-        try:
-            grant = await FetchLeaseService(session, app.state.frontier_policy).renew(
-                crawl_id=request.crawl_id, url_id=request.url_id, fetch_attempt=request.fetch_attempt,
-                owner_token=request.owner_token,
-            )
-        except LeaseLostError as error:
-            raise HTTPException(status_code=409, detail="lease_lost") from error
-        return FetchLeaseResponse(owner_token=grant.owner_token, lease_until=grant.lease_until)
-
-    @app.post("/internal/fetch-leases/submit", status_code=status.HTTP_204_NO_CONTENT)
-    async def submit_fetch_lease(request: FetchLeaseSubmitRequest, session: Annotated[AsyncSession, Depends(get_session)]):
-        classes = (PageFetchedEvent, PageFailedEvent, FetchRetryRequestedEvent)
-        event = None
-        for cls in classes:
-            try:
-                event = cls.model_validate(request.event)
-                break
-            except ValidationError:
-                continue
-        if event is None:
-            raise HTTPException(status_code=422, detail="invalid fetch outcome")
-        if (event.crawl_id, event.url_id, event.fetch_attempt) != (request.crawl_id, request.url_id, request.fetch_attempt):
-            raise HTTPException(status_code=422, detail="outcome identity mismatch")
-        try:
-            await FetchLeaseService(session, app.state.frontier_policy).submit(event, owner_token=request.owner_token)
-        except LeaseLostError as error:
-            raise HTTPException(status_code=409, detail="lease_lost") from error
-
-    @app.post(
-        "/internal/crawls",
-        response_model=CreatedCrawlResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def create_crawl(
-        payload: CreateCrawlRequest,
-        session: Annotated[AsyncSession, Depends(get_session)],
-    ) -> CreatedCrawlResponse:
-        """Create a crawl and its initial fetch work inside Frontier's database."""
-        try:
-            created = await CrawlService(session, app.state.frontier_policy).create_crawl(
-                payload.seed_urls,
-                additional_allowed_hosts=payload.additional_allowed_hosts,
-            )
-        except UrlValidationError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=str(error),
-            ) from error
-        return CreatedCrawlResponse(crawl_id=created.crawl_id)
-
-    @app.get("/internal/crawls/{crawl_id}", response_model=CrawlStatusResponse)
-    async def get_crawl_status(
-        crawl_id: UUID,
-        session: Annotated[AsyncSession, Depends(get_session)],
-    ) -> CrawlStatusResponse:
-        """Report a crawl's derived scheduling status without mutating it."""
-        try:
-            crawl_status = await CrawlService(
-                session, app.state.frontier_policy
-            ).get_crawl_status(crawl_id=crawl_id)
-        except CrawlNotFoundError as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Crawl not found",
-            ) from error
-        return CrawlStatusResponse(
-            crawl_id=crawl_status.crawl_id,
-            state=crawl_status.state,
-            url_counts={
-                url_status.value: count for url_status, count in crawl_status.url_counts.items()
-            },
-        )
 
     return app
 
