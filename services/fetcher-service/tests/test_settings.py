@@ -88,3 +88,9 @@ def test_connection_secrets_are_excluded_from_settings_output(raw_credentials: b
     assert "redis_url" not in settings.model_dump()
     assert "rabbitsecret" in str(settings.rabbitmq_url)
     assert "redissecret" in str(settings.redis_url)
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_chain_timeout_must_be_positive(value: float) -> None:
+    with pytest.raises(ValidationError, match="http_chain_timeout_seconds"):
+        FetcherSettings(**SETTINGS_VALUES, http_chain_timeout_seconds=value)

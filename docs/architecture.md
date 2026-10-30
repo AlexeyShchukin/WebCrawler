@@ -649,6 +649,8 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `FETCH_CONCURRENCY` | Fetcher | Maximum parallel HTTP requests per replica |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | Fetcher | Connection timeout |
 | `HTTP_READ_TIMEOUT_SECONDS` | Fetcher | Socket read timeout |
+| `HTTP_TOTAL_TIMEOUT_SECONDS` | Fetcher | Total timeout for each HTTP request, including body reading; default `60` |
+| `HTTP_CHAIN_TIMEOUT_SECONDS` | Fetcher | Overall deadline for DNS, redirects, admission and response reading; default `120` |
 | `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size; default `5 MiB`, maximum `50 MiB` |
 | `ORIGIN_REQUESTS_PER_SECOND` | Fetcher | Per-origin request rate |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |
