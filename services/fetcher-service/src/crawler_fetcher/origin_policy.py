@@ -10,6 +10,10 @@ _STATE_TTL_MILLISECONDS = 3_600_000
 _ACQUIRE_LUA = """
 local now = redis.call('TIME')
 local now_ms = now[1] * 1000 + math.floor(now[2] / 1000)
+local rate_limited_until = tonumber(redis.call('HGET', KEYS[1], 'rate_limited_until') or '0')
+if rate_limited_until > now_ms then
+  return {1, rate_limited_until - now_ms}
+end
 local cooldown_until = tonumber(redis.call('HGET', KEYS[1], 'cooldown_until') or '0')
 if cooldown_until > now_ms then
   return {1, cooldown_until - now_ms}
@@ -20,6 +24,16 @@ if next_allowed_at > now_ms then
 end
 redis.call('HSET', KEYS[1], 'next_allowed_at', now_ms + tonumber(ARGV[1]))
 redis.call('PEXPIRE', KEYS[1], math.max(tonumber(ARGV[2]), tonumber(ARGV[1])))
+return {0, 0}
+"""
+
+_RATE_LIMIT_LUA = """
+local now = redis.call('TIME')
+local now_ms = now[1] * 1000 + math.floor(now[2] / 1000)
+local until_ms = math.max(tonumber(redis.call('HGET', KEYS[1], 'rate_limited_until') or '0'), now_ms + tonumber(ARGV[1]))
+redis.call('HSET', KEYS[1], 'rate_limited_until', until_ms)
+local ttl = redis.call('PTTL', KEYS[1])
+redis.call('PEXPIRE', KEYS[1], math.max(ttl, tonumber(ARGV[2]), until_ms - now_ms))
 return {0, 0}
 """
 
@@ -99,6 +113,14 @@ class OriginPolicy:
     async def record_failure(self, origin: str) -> None:
         await self._record(origin, is_success=False)
 
+    async def record_rate_limit(self, origin: str, delay_seconds: int) -> None:
+        result = await self._eval(
+            _RATE_LIMIT_LUA, self.key_for(origin),
+            max(1, delay_seconds) * 1000, _STATE_TTL_MILLISECONDS,
+        )
+        if _parse_result(result) != (0, 0):
+            raise OriginPolicyUnavailable()
+
     async def _record(self, origin: str, *, is_success: bool) -> None:
         result = await self._eval(
             _RECORD_LUA,
@@ -121,10 +143,10 @@ class OriginPolicy:
 def _parse_result(result: object) -> tuple[int, int]:
     """Validate the complete Redis Lua response without coercion."""
     if (
-        not isinstance(result, (list, tuple))
-        or len(result) != 2
-        or type(result[0]) is not int
-        or type(result[1]) is not int
+            not isinstance(result, (list, tuple))
+            or len(result) != 2
+            or type(result[0]) is not int
+            or type(result[1]) is not int
     ):
         raise OriginPolicyUnavailable()
     code, delay_ms = result
