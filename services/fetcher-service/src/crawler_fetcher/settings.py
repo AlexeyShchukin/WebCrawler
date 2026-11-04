@@ -21,6 +21,8 @@ class FetcherSettings(BaseSettings):
     redis_password: str | None = Field(default=None, exclude=True, repr=False)
     redis_host: str = Field(default="redis", exclude=True)
     redis_port: int = Field(default=6379, exclude=True)
+    redis_connect_timeout_seconds: Annotated[float, Field(default=2, gt=0, le=10)]
+    redis_operation_timeout_seconds: Annotated[float, Field(default=3, gt=0, le=10)]
     object_storage_endpoint: AnyHttpUrl
     object_storage_access_key: SecretStr
     object_storage_secret_key: SecretStr
@@ -38,6 +40,12 @@ class FetcherSettings(BaseSettings):
     ]
     origin_requests_per_second: Annotated[float, Field(default=1.0, gt=0, le=100)]
     circuit_breaker_failure_threshold: Annotated[int, Field(default=5, ge=1, le=100)]
+
+    @model_validator(mode="after")
+    def validate_redis_timeouts(self) -> "FetcherSettings":
+        if self.redis_connect_timeout_seconds > self.redis_operation_timeout_seconds:
+            raise ValueError("redis connect timeout cannot exceed operation timeout")
+        return self
 
     @model_validator(mode="before")
     @classmethod

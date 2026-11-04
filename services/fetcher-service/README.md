@@ -29,6 +29,8 @@ Compose interpolation. Optional settings and defaults are:
 | Variable | Default |
 | --- | --- |
 | `FETCH_CONCURRENCY` | 10 |
+| `REDIS_CONNECT_TIMEOUT_SECONDS` | 2 |
+| `REDIS_OPERATION_TIMEOUT_SECONDS` | 3 |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | 10 |
 | `HTTP_READ_TIMEOUT_SECONDS` | 30 |
 | `HTTP_TOTAL_TIMEOUT_SECONDS` | 60 |
@@ -36,6 +38,10 @@ Compose interpolation. Optional settings and defaults are:
 | `HTTP_MAX_BODY_BYTES` | 5242880 |
 | `ORIGIN_REQUESTS_PER_SECOND` | 1.0 |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | 5 |
+
+Redis timeouts must be positive and at most 10 seconds; the connection timeout
+must not exceed the operation timeout. The operation deadline includes connection
+acquisition and applies even when `REDIS_URL` contains client timeout parameters.
 
 Fetcher claims and renews a Frontier HTTP lease before and during a fetch, then
 submits `page.fetched`, `fetch.retry_requested`, or `page.failed` with the

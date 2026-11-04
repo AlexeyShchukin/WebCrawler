@@ -1,5 +1,6 @@
 """Shared, fail-closed Redis admission policy for Fetcher origins."""
 
+import asyncio
 import hashlib
 import math
 from typing import Protocol
@@ -85,6 +86,7 @@ class OriginPolicy:
 
     def __init__(self, redis: RedisClient, settings: OriginPolicySettings) -> None:
         self._redis = redis
+        self._operation_timeout = getattr(settings, "redis_operation_timeout_seconds", 3.0)
         rate = settings.origin_requests_per_second
         if not math.isfinite(rate) or rate <= 0 or not math.isfinite(1000 / rate):
             raise ValueError("origin_requests_per_second must be finite and positive")
@@ -135,7 +137,8 @@ class OriginPolicy:
 
     async def _eval(self, script: str, key: str, *args: object) -> object:
         try:
-            return await self._redis.eval(script, 1, key, *args)
+            async with asyncio.timeout(self._operation_timeout):
+                return await self._redis.eval(script, 1, key, *args)
         except Exception as error:
             raise OriginPolicyUnavailable() from error
 

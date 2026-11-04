@@ -18,6 +18,8 @@ from crawler_contracts import (
 )
 from crawler_contracts.events import FailureCategory, FailureStage, FetchRetryCategory
 from redis.asyncio import Redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 from yarl import URL
 
 from crawler_fetcher.lease_client import FrontierLeaseClient, LeaseLostError
@@ -74,9 +76,16 @@ class FetcherWorker:
         try:
             self.publisher = await self._stack.enter_async_context(FetcherPublisher(self.settings))
             self.storage = await self._stack.enter_async_context(ObjectStorage(self.settings))
-            redis = Redis.from_url(str(self.settings.redis_url))
+            redis = Redis.from_url(
+                str(self.settings.redis_url),
+                socket_connect_timeout=self.settings.redis_connect_timeout_seconds,
+                socket_timeout=self.settings.redis_operation_timeout_seconds,
+                retry_on_timeout=False,
+                retry=Retry(NoBackoff(), 0),
+            )
             self._stack.push_async_callback(redis.aclose)
-            await redis.ping()
+            async with asyncio.timeout(self.settings.redis_operation_timeout_seconds):
+                await redis.ping()
             self.origin_policy = OriginPolicy(redis, self.settings)
             self.resolver = PublicResolver(aiohttp.resolver.DefaultResolver())
             self.session = await self._stack.enter_async_context(
