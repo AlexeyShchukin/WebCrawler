@@ -35,7 +35,7 @@ def test_retry_after_http_date_rounds_fractional_seconds_up() -> None:
 
 def test_bad_http_date_uses_existing_exponential_fallback() -> None:
     now = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
-    assert suggest_retry_delay(4, "Wed, 99 Nov 2026 12:00:00 GMT", lambda: 0.5, now=now) == 8
+    assert suggest_retry_delay(4, "Wed, 99 Nov 2026 12:00:00 GMT", lambda: 0.5, now=now) == 12
 
 
 def test_future_http_date_changes_actual_retry_delay() -> None:
@@ -46,11 +46,35 @@ def test_future_http_date_changes_actual_retry_delay() -> None:
 @pytest.mark.parametrize("error", [ValueError(), TypeError(), OverflowError(), IndexError()])
 def test_http_date_parser_errors_use_fallback(error) -> None:
     with patch("crawler_fetcher.outcomes.parsedate_to_datetime", side_effect=error):
-        assert suggest_retry_delay(4, "bad-date", lambda: 0.5) == 8
+        assert suggest_retry_delay(4, "bad-date", lambda: 0.5) == 12
 
 
 def test_retry_after_overrides_exponential_delay() -> None:
     assert suggest_retry_delay(1, "120", lambda: 0.5) == 120
+
+
+@pytest.mark.parametrize(("random_value", "expected"), [
+    (0.0, 4), (0.25, 5), (0.5, 6), (0.99, 8),
+])
+def test_exponential_retry_uses_integer_jitter(random_value: float, expected: int) -> None:
+    assert suggest_retry_delay(3, None, lambda: random_value) == expected
+
+
+@pytest.mark.parametrize(("attempt", "random_value", "expected"), [
+    (1, 0.0, 1), (1, 0.99, 2), (2, 0.99, 4),
+    (11, 0.99, 2038), (12, 0.99, 3600), (1000000, 0.99, 3600),
+])
+def test_jitter_bounds(attempt: int, random_value: float, expected: int) -> None:
+    assert suggest_retry_delay(attempt, None, lambda: random_value) == expected
+
+
+@pytest.mark.parametrize("header", ["120", "Wed, 04 Nov 2026 12:02:00 GMT"])
+def test_valid_retry_after_never_draws_jitter(header: str) -> None:
+    def unexpected_random():
+        raise AssertionError("valid Retry-After must not draw jitter")
+
+    now = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
+    assert suggest_retry_delay(3, header, unexpected_random, now=now) == 120
 
 
 @pytest.mark.parametrize(("header", "expected"), [
@@ -71,7 +95,7 @@ def test_zero_retry_after_is_clamped_without_using_exponential_fallback() -> Non
 
 @pytest.mark.parametrize("retry_after", ["-0", "+1", "1_0", "１２"])
 def test_non_ascii_or_non_decimal_retry_after_uses_exponential_fallback(retry_after: str) -> None:
-    assert suggest_retry_delay(8, retry_after, lambda: 0.9) == 128
+    assert suggest_retry_delay(8, retry_after, lambda: 0.9) == 244
 
 
 @pytest.mark.parametrize("retry_after", ["", "-1", "1.5", "tomorrow"])

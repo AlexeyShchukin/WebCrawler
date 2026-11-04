@@ -43,6 +43,11 @@ Redis timeouts must be positive and at most 10 seconds; the connection timeout
 must not exceed the operation timeout. The operation deadline includes connection
 acquisition and applies even when `REDIS_URL` contains client timeout parameters.
 
+Without a valid `Retry-After`, Fetcher suggests a bounded exponential delay with
+integer additive jitter between the base delay and twice the base, capped at
+3600 seconds. Frontier maps suggestions to fixed retry buckets, so distinct
+suggested delays can still result in the same delivery time.
+
 Fetcher claims and renews a Frontier HTTP lease before and during a fetch, then
 submits `page.fetched`, `fetch.retry_requested`, or `page.failed` with the
 owner token. Frontier publishes the accepted outcome from its transactional

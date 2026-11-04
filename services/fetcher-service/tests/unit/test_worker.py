@@ -99,6 +99,17 @@ async def test_transient_fetch_failure_submits_retry_request(worker, message):
 
 
 @pytest.mark.asyncio
+async def test_retry_request_contains_jittered_delay(worker, message, monkeypatch):
+    monkeypatch.setattr("crawler_fetcher.worker.random.random", lambda: 0.99)
+    worker.fetch.side_effect = NetworkFailure("timeout")
+    await worker.handle_message(message)
+    result = worker.lease_client.submit.await_args.args[0]
+    assert result.suggested_delay_seconds == 2
+    assert type(result.suggested_delay_seconds) is int
+    message.ack.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_malformed_delivery_is_rejected(worker, message):
     message.body = b"{}"
     await worker.handle_message(message)

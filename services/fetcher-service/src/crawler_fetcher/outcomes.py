@@ -56,7 +56,8 @@ def suggest_retry_delay(
             return max(1, min(3600, math.ceil(seconds)))
         except (TypeError, ValueError, OverflowError, IndexError):
             pass
-    return min(3600, max(1, int(2 ** min(attempt - 1, 12) + random_seconds())))
+    base = min(3600, 2 ** min(attempt - 1, 12))
+    return min(3600, base + int(random_seconds() * (base + 1)))
 
 
 def classify_fetch_failure(
