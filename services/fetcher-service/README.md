@@ -4,6 +4,10 @@ Consumes URL fetch tasks from RabbitMQ and downloads HTML pages.
 
 Fetcher enforces outbound HTTP controls including connection limits, timeouts, response size limits, retry backoff, per-origin rate limits, circuit breaking, and redirect validation.
 
+The public HTTP session does not retain or automatically send cookies, including
+across redirects and retries. Sites that require cookies may return different
+content or fail to complete a redirect.
+
 `HTTP_MAX_BODY_BYTES` limits an accepted response body. Its default is 5 MiB and its maximum is 50 MiB.
 
 The application exposes `GET /health`, returning 200 after successful worker

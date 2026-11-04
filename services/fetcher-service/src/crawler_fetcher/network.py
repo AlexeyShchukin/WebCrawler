@@ -92,7 +92,9 @@ def create_http_session(
         connect=settings.http_connect_timeout_seconds,
         sock_read=settings.http_read_timeout_seconds,
     )
-    return aiohttp.ClientSession(connector=connector, timeout=timeout)
+    return aiohttp.ClientSession(
+        connector=connector, timeout=timeout, cookie_jar=aiohttp.DummyCookieJar()
+    )
 
 
 def _validated_port(url: URL) -> int | None:
