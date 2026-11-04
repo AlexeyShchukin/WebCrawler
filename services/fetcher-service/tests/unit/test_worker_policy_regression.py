@@ -1,10 +1,14 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 from crawler_contracts import FetchUrlEvent
 
+from crawler_fetcher.origin_policy import OriginPolicy
 from crawler_fetcher.worker import FetcherWorker
 
 
@@ -55,3 +59,23 @@ async def test_shutdown_waits_for_cancelled_task_before_closing_dependencies():
     release.set()
     await closing
     assert task.done() and closed
+
+
+@pytest.mark.asyncio
+async def test_http_date_outcome_survives_redis_timeout():
+    class HungRedis:
+        async def eval(self, *args):
+            await asyncio.Event().wait()
+
+    worker = FetcherWorker(Mock())
+    worker.origin_policy = OriginPolicy(HungRedis(), SimpleNamespace(
+        origin_requests_per_second=1, circuit_breaker_failure_threshold=5,
+        redis_operation_timeout_seconds=0.02,
+    ))
+    event = FetchUrlEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1,
+                          url='https://example.com/', depth=0)
+    header = format_datetime(datetime.now(UTC) + timedelta(seconds=120), usegmt=True)
+    result = await asyncio.wait_for(worker._failure(
+        event, 'https://example.com', detail='HTTP 429', http_status=429, retry_after=header
+    ), 0.5)
+    assert 118 <= result.suggested_delay_seconds <= 120

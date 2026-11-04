@@ -1,6 +1,7 @@
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -36,6 +37,43 @@ async def test_live_redis_concurrent_429_shared_across_workers():
             await workers[1].acquire(origin)
         await asyncio.sleep(2.1)
         await workers[2].acquire(origin)
+    finally:
+        await redis.delete(key)
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not os.getenv('TEST_REDIS_URL'), reason='requires isolated Redis')
+async def test_http_date_outcome_sets_shared_redis_cooldown():
+    redis = Redis.from_url(os.environ['TEST_REDIS_URL'])
+    settings = SimpleNamespace(origin_requests_per_second=1, circuit_breaker_failure_threshold=2)
+    first, second = OriginPolicy(redis, settings), OriginPolicy(redis, settings)
+    origin = f'https://{uuid4().hex}.example'
+    event = FetchUrlEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1,
+                          url=f'{origin}/', depth=0)
+    worker = FetcherWorker(Mock())
+    worker.origin_policy = first
+    header = format_datetime(datetime.now(UTC) + timedelta(seconds=120), usegmt=True)
+    key = first.key_for(origin)
+    try:
+        seconds, microseconds = await redis.time()
+        before = seconds * 1000 + microseconds // 1000
+        outcome = await worker._failure(event, origin, detail='HTTP 429', http_status=429,
+                                        retry_after=header)
+        seconds, microseconds = await redis.time()
+        after = seconds * 1000 + microseconds // 1000
+        delay = outcome.suggested_delay_seconds
+        assert 115 <= delay <= 120
+        until = int(await redis.hget(key, 'rate_limited_until'))
+        assert before + delay * 1000 <= until <= after + delay * 1000
+        with pytest.raises(OriginDeferred) as deferred:
+            await second.acquire(origin)
+        assert 0 < deferred.value.delay_seconds <= delay
+        await second.record_success(origin)
+        await second.record_rate_limit(origin, 1)
+        assert int(await redis.hget(key, 'rate_limited_until')) == until
+        with pytest.raises(OriginDeferred):
+            await first.acquire(origin)
     finally:
         await redis.delete(key)
         await redis.aclose()

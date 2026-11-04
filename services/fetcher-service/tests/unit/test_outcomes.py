@@ -1,3 +1,7 @@
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
+from unittest.mock import patch
+
 import aiohttp
 import pytest
 from crawler_contracts.events import FailureCategory, FetchRetryCategory
@@ -9,6 +13,40 @@ from crawler_fetcher.outcomes import (
     classify_fetch_failure,
     suggest_retry_delay,
 )
+
+
+@pytest.mark.parametrize(("header", "expected"), [
+    ("Wed, 04 Nov 2026 12:02:00 GMT", 120),
+    ("Wednesday, 04-Nov-26 12:02:00 GMT", 120),
+    ("Wed Nov  4 12:02:00 2026", 120),
+    ("Wed, 04 Nov 2026 12:00:00 GMT", 1),
+    ("Wed, 04 Nov 2026 11:59:59 GMT", 1),
+    ("Wed, 04 Nov 2026 14:00:00 GMT", 3600),
+])
+def test_retry_after_http_date_is_bounded(header: str, expected: int) -> None:
+    now = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
+    assert suggest_retry_delay(1, header, lambda: 0.5, now=now) == expected
+
+
+def test_retry_after_http_date_rounds_fractional_seconds_up() -> None:
+    now = datetime(2026, 11, 4, 12, 0, 0, 500000, tzinfo=UTC)
+    assert suggest_retry_delay(1, "Wed, 04 Nov 2026 12:00:02 GMT", lambda: 0.5, now=now) == 2
+
+
+def test_bad_http_date_uses_existing_exponential_fallback() -> None:
+    now = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
+    assert suggest_retry_delay(4, "Wed, 99 Nov 2026 12:00:00 GMT", lambda: 0.5, now=now) == 8
+
+
+def test_future_http_date_changes_actual_retry_delay() -> None:
+    header = format_datetime(datetime.now(UTC) + timedelta(minutes=2), usegmt=True)
+    assert 119 <= suggest_retry_delay(1, header, lambda: 0.5) <= 120
+
+
+@pytest.mark.parametrize("error", [ValueError(), TypeError(), OverflowError(), IndexError()])
+def test_http_date_parser_errors_use_fallback(error) -> None:
+    with patch("crawler_fetcher.outcomes.parsedate_to_datetime", side_effect=error):
+        assert suggest_retry_delay(4, "bad-date", lambda: 0.5) == 8
 
 
 def test_retry_after_overrides_exponential_delay() -> None:

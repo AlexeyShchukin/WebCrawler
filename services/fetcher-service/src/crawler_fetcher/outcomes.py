@@ -1,8 +1,11 @@
 """Classification of one Fetcher execution without allocating attempts."""
 
 import logging
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 
 import aiohttp
@@ -34,7 +37,8 @@ class ObjectStorageFailure(Exception):
 
 
 def suggest_retry_delay(
-    attempt: int, retry_after: str | None, random_seconds: Callable[[], float]
+    attempt: int, retry_after: str | None, random_seconds: Callable[[], float],
+    *, now: datetime | None = None,
 ) -> int:
     """Return a bounded server-directed or jittered exponential retry delay."""
     if retry_after is not None and retry_after.isascii() and retry_after.isdecimal():
@@ -42,6 +46,16 @@ def suggest_retry_delay(
         if len(digits) > 4 or (len(digits) == 4 and digits > "3600"):
             return 3600
         return max(1, int(digits))
+    if retry_after is not None:
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            current_time = now if now is not None else datetime.now(UTC)
+            seconds = (retry_at - current_time).total_seconds()
+            return max(1, min(3600, math.ceil(seconds)))
+        except (TypeError, ValueError, OverflowError, IndexError):
+            pass
     return min(3600, max(1, int(2 ** min(attempt - 1, 12) + random_seconds())))
 
 

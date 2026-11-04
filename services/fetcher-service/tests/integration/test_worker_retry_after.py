@@ -1,5 +1,6 @@
 import socket
 from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -16,9 +17,12 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 @pytest.mark.parametrize("status", [404, 429, 503])
-async def test_long_retry_after_does_not_stop_consumer(status):
+@pytest.mark.parametrize("header_kind", ["long_decimal", "http_date"])
+async def test_retry_after_does_not_stop_consumer(status, header_kind):
+    retry_after = ("9" * 5000 if header_kind == "long_decimal" else
+                   format_datetime(datetime.now(UTC) + timedelta(seconds=120), usegmt=True))
     async def handler(request):
-        return web.Response(status=status, headers={"Retry-After": "9" * 5000})
+        return web.Response(status=status, headers={"Retry-After": retry_after})
 
     class Route(aiohttp.abc.AbstractResolver):
         async def resolve(self, host, port=0, family=socket.AF_UNSPEC):
@@ -67,7 +71,15 @@ async def test_long_retry_after_does_not_stop_consumer(status):
         result = worker.lease_client.submit.await_args.args[0]
         assert isinstance(result, PageFailedEvent if status == 404 else FetchRetryRequestedEvent)
         if status != 404:
-            assert result.suggested_delay_seconds == 3600
+            delay = result.suggested_delay_seconds
+            if header_kind == "long_decimal":
+                assert delay == 3600
+            else:
+                assert 115 <= delay <= 120
+            if status == 429:
+                worker.origin_policy.record_rate_limit.assert_awaited_once_with(
+                    f"http://public.test:{port}", delay
+                )
         assert order == ["submit", "ack"]
         message.ack.assert_awaited_once()
         worker.publisher.channel.close.assert_not_awaited()
