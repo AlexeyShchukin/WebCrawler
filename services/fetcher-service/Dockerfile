@@ -27,3 +27,6 @@ WORKDIR /app/services/fetcher-service
 COPY --from=builder --chown=crawler:crawler /app/services/fetcher-service/.venv .venv
 
 USER crawler
+
+CMD ["uvicorn", "crawler_fetcher.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+
