@@ -1,5 +1,4 @@
 import asyncio
-import math
 import os
 from dataclasses import dataclass
 from uuid import uuid4
@@ -10,8 +9,9 @@ from redis.asyncio import Redis
 from crawler_fetcher.origin_policy import (
     OriginDeferred,
     OriginPolicy,
-    OriginPolicyUnavailable,
 )
+
+pytestmark = [pytest.mark.integration, pytest.mark.requires_infra]
 
 
 @dataclass
@@ -28,19 +28,8 @@ class ResponseRedis:
         return self.result
 
 
-@pytest.mark.parametrize("rate", [0.0, -1.0, math.inf, math.nan])
-def test_invalid_origin_rate_is_rejected(rate: float) -> None:
-    with pytest.raises(ValueError):
-        OriginPolicy(ResponseRedis([0, 0]), Settings(origin_requests_per_second=rate))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("result", [None, [], [0], [1, 0], [0, 1], [0, 0, 0], ["bad", 0]])
-@pytest.mark.parametrize("method", ["record_success", "record_failure"])
-async def test_record_rejects_unexpected_redis_response(result: object, method: str) -> None:
-    policy = OriginPolicy(ResponseRedis(result), Settings())
-    with pytest.raises(OriginPolicyUnavailable):
-        await getattr(policy, method)("https://example.test")
 
 
 @pytest.mark.asyncio

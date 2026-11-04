@@ -1,4 +1,4 @@
-﻿"""Opt-in checks against isolated real RabbitMQ, Redis and MinIO services."""
+"""Opt-in checks against isolated real RabbitMQ, Redis and MinIO services."""
 
 import asyncio
 import os
@@ -20,13 +20,15 @@ from crawler_fetcher.storage import ObjectStorage
 from crawler_fetcher.worker import FetcherWorker
 
 pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_infra,
     pytest.mark.asyncio,
     pytest.mark.skipif(os.getenv("FETCHER_LIVE_INTEGRATION") != "1", reason="requires isolated live services"),
 ]
 
 
 def live_settings():
-    env = dotenv_values(Path(__file__).resolve().parents[3] / ".env.example")
+    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env.example")
     return FetcherSettings(
         rabbitmq_user=env["RABBITMQ_USER"], rabbitmq_password=env["RABBITMQ_PASSWORD"],
         rabbitmq_host="127.0.0.1", rabbitmq_port=int(os.getenv("LIVE_RABBIT_PORT", "5672")),

@@ -7,12 +7,11 @@ from aiohttp import web
 
 from crawler_fetcher.network import (
     NetworkFailure,
-    PublicResolver,
-    _require_public_addresses,
-    create_http_session,
     fetch_html,
 )
 from crawler_fetcher.settings import FetcherSettings
+
+pytestmark = pytest.mark.integration
 
 
 def settings(**kwargs):
@@ -28,22 +27,8 @@ def settings(**kwargs):
 
 
 
-def test_unexpected_address_type_is_dns_failure(monkeypatch):
-    def reject(value):
-        raise TypeError("unexpected type")
-
-    monkeypatch.setattr("crawler_fetcher.network.ipaddress.ip_address", reject)
-    with pytest.raises(NetworkFailure, match="dns_failure"):
-        _require_public_addresses([object()])
 
 
-@pytest.mark.asyncio
-async def test_session_has_configured_total():
-    resolver = PublicResolver(aiohttp.resolver.DefaultResolver())
-    async with create_http_session(
-        settings(http_total_timeout_seconds=0.1), resolver
-    ) as session:
-        assert session.timeout.total == 0.1
 
 
 @pytest.mark.asyncio

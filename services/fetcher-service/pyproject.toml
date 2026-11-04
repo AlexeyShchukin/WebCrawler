@@ -33,3 +33,9 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "crawler_fetcher"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests integrating multiple components",
+    "requires_infra: tests requiring Redis, RabbitMQ or MinIO",
+]

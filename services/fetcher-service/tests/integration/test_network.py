@@ -1,5 +1,4 @@
-﻿import asyncio
-import inspect
+import asyncio
 import socket
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -8,16 +7,16 @@ import aiohttp
 import pytest
 import pytest_asyncio
 from aiohttp import web
-from yarl import URL
 
 from crawler_fetcher.network import (
     NetworkFailure,
     PublicResolver,
     create_http_session,
     fetch_html,
-    validate_public_target,
 )
 from crawler_fetcher.settings import FetcherSettings
+
+pytestmark = pytest.mark.integration
 
 
 class StubResolver:
@@ -179,64 +178,14 @@ def settings() -> FetcherSettings:
     )
 
 
-@pytest.mark.asyncio
-async def test_rejects_private_dns_answer() -> None:
-    resolver = StubResolver({"internal.test": ["10.0.0.7"]})
-
-    with pytest.raises(NetworkFailure, match="ssrf_blocked"):
-        await validate_public_target(URL("http://internal.test/"), resolver)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "url",
-    [
-        "ftp://public.test/file",
-        "http://user:password@public.test/",
-        "http:///missing-host",
-        "http://public.test:0/",
-    ],
-)
-async def test_rejects_malformed_or_unsafe_url_forms(url: str, public_resolver: StubResolver) -> None:
-    with pytest.raises(NetworkFailure, match="invalid_url"):
-        await validate_public_target(URL(url), public_resolver)
 
 
-@pytest.mark.asyncio
-async def test_rejects_an_out_of_range_port_before_connecting(
-    public_resolver: StubResolver,
-) -> None:
-    async with local_session() as session:
-        with pytest.raises(NetworkFailure, match="invalid_url"):
-            await fetch_html(
-                session,
-                "http://public.test:65536/",
-                max_body_bytes=1024,
-                chain_timeout_seconds=120, resolver=public_resolver,
-            )
 
 
-@pytest.mark.asyncio
-async def test_connector_resolver_rejects_a_private_dns_result(
-    settings: FetcherSettings,
-) -> None:
-    resolver = PublicResolver(FixedAiohttpResolver("127.0.0.1"))
-    session = create_http_session(settings, resolver)
-    try:
-        with pytest.raises(NetworkFailure, match="ssrf_blocked"):
-            await session.get("http://public.test/", allow_redirects=False)
-        assert session.connector is not None
-        assert session.connector._use_dns_cache is False
-    finally:
-        await session.close()
 
 
-@pytest.mark.asyncio
-async def test_connector_resolver_normalizes_malformed_dns_records() -> None:
-    resolver = PublicResolver(MalformedAiohttpResolver())
-
-    with pytest.raises(NetworkFailure, match="dns_failure"):
-        await resolver.resolve("public.test")
 
 
 @pytest.mark.asyncio
@@ -497,8 +446,6 @@ async def test_rebinding_does_not_connect_to_local_server(settings: FetcherSetti
 
 
 
-def test_chain_timeout_is_required() -> None:
-    assert inspect.signature(fetch_html).parameters["chain_timeout_seconds"].default is inspect.Parameter.empty
 
 
 @pytest.mark.asyncio

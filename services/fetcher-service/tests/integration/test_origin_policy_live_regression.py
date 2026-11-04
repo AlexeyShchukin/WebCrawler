@@ -10,6 +10,8 @@ from redis.asyncio import Redis
 from crawler_fetcher.origin_policy import OriginDeferred, OriginPolicy
 
 pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_infra,
     pytest.mark.asyncio,
     pytest.mark.skipif(not os.getenv("TEST_REDIS_URL"), reason="requires isolated Redis"),
 ]
