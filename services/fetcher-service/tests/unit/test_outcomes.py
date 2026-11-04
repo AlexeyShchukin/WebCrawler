@@ -15,6 +15,14 @@ def test_retry_after_overrides_exponential_delay() -> None:
     assert suggest_retry_delay(1, "120", lambda: 0.5) == 120
 
 
+@pytest.mark.parametrize(("header", "expected"), [
+    ("9" * 5000, 3600), ("0" * 5000 + "120", 120),
+    ("0" * 5000, 1), ("3599", 3599), ("3600", 3600), ("3601", 3600),
+])
+def test_retry_after_large_decimal_is_bounded(header: str, expected: int) -> None:
+    assert suggest_retry_delay(1, header, lambda: 0.5) == expected
+
+
 def test_retry_after_is_capped_at_the_maximum_delay() -> None:
     assert suggest_retry_delay(1, "3601", lambda: 0.5) == 3600
 

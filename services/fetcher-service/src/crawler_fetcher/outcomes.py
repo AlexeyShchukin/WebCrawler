@@ -38,8 +38,10 @@ def suggest_retry_delay(
 ) -> int:
     """Return a bounded server-directed or jittered exponential retry delay."""
     if retry_after is not None and retry_after.isascii() and retry_after.isdecimal():
-        parsed = int(retry_after)
-        return max(1, min(3600, parsed))
+        digits = retry_after.lstrip("0") or "0"
+        if len(digits) > 4 or (len(digits) == 4 and digits > "3600"):
+            return 3600
+        return max(1, int(digits))
     return min(3600, max(1, int(2 ** min(attempt - 1, 12) + random_seconds())))
 
 
