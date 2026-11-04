@@ -2,6 +2,9 @@
 
 Consumes URL fetch tasks from RabbitMQ and downloads HTML pages.
 
+Successful responses must have the MIME type `text/html` or
+`application/xhtml+xml`. The response body is stored without parsing.
+
 Fetcher enforces outbound HTTP controls including connection limits, timeouts, response size limits, retry backoff, per-origin rate limits, circuit breaking, and redirect validation.
 
 The public HTTP session does not retain or automatically send cookies, including

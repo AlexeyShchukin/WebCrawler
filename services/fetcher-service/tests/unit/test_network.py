@@ -3,6 +3,7 @@ import inspect
 import socket
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, Mock
 
 import aiohttp
 import pytest
@@ -26,6 +27,29 @@ class StubResolver:
 
     async def resolve(self, host: str) -> list[str]:
         return self.answers[host]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mime", "limit", "error"), [
+    ("application/xhtml+xml", 100, None),
+    ("application/xhtml+xml", 1, "response_too_large"),
+    ("application/xml", 100, "unsupported_mime"),
+])
+async def test_xhtml_and_rejected_responses_are_released(mime, limit, error):
+    async def chunks(size):
+        yield b"<html/>"
+
+    response = Mock(status=200, content_type=mime, content=Mock(iter_chunked=chunks))
+    session = Mock(get=AsyncMock(return_value=response))
+    resolver = StubResolver({"public.test": ["8.8.8.8"]})
+    if error:
+        with pytest.raises(NetworkFailure, match=error):
+            await fetch_html(session, "https://public.test/", max_body_bytes=limit,
+                             resolver=resolver, chain_timeout_seconds=1)
+    else:
+        await fetch_html(session, "https://public.test/", max_body_bytes=limit,
+                         resolver=resolver, chain_timeout_seconds=1)
+    response.release.assert_called_once()
 
 
 class LocalRoutingResolver(aiohttp.abc.AbstractResolver):

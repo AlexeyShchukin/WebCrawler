@@ -349,6 +349,95 @@ async def test_accepts_html_content_type_with_parameters(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", [
+    "application/xhtml+xml", "application/xhtml+xml; charset=utf-8",
+])
+async def test_fetches_xhtml_with_or_without_parameters(http_server, public_resolver, content_type):
+    body = b'<html xmlns="http://www.w3.org/1999/xhtml"><body>ok</body></html>'
+
+    async def xhtml(request):
+        return web.Response(body=body, headers={"Content-Type": content_type})
+
+    http_server.handlers["/xhtml"] = xhtml
+    async with local_session() as session:
+        response = await fetch_html(session, http_server.url("/xhtml"), max_body_bytes=1024,
+                                    chain_timeout_seconds=2, resolver=public_resolver)
+    assert response.content_type == "application/xhtml+xml"
+    assert response.body == body
+
+
+@pytest.mark.asyncio
+async def test_xhtml_body_is_subject_to_response_limit(http_server, public_resolver):
+    http_server.response("/large-xhtml", body=b"x" * 1025, content_type="application/xhtml+xml")
+    async with local_session() as session:
+        with pytest.raises(NetworkFailure, match="response_too_large"):
+            await fetch_html(session, http_server.url("/large-xhtml"), max_body_bytes=1024,
+                             chain_timeout_seconds=2, resolver=public_resolver)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ["application/xml", "text/xml", "application/json"])
+async def test_non_xhtml_xml_and_json_remain_unsupported(http_server, public_resolver, content_type):
+    http_server.response("/unsupported", body=b"test", content_type=content_type)
+    async with local_session() as session:
+        with pytest.raises(NetworkFailure, match="unsupported_mime"):
+            await fetch_html(session, http_server.url("/unsupported"), max_body_bytes=1024,
+                             chain_timeout_seconds=2, resolver=public_resolver)
+
+
+@pytest.mark.asyncio
+async def test_xhtml_worker_uploads_and_submits_real_content_type(http_server, public_resolver, settings):
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock, Mock
+    from uuid import uuid4
+
+    from crawler_contracts import FetchUrlEvent, PageFetchedEvent
+
+    from crawler_fetcher.lease_client import LeaseGrant
+    from crawler_fetcher.storage import ObjectStorage
+    from crawler_fetcher.worker import FetcherWorker
+
+    body = b"<html xmlns='http://www.w3.org/1999/xhtml'><body>hello</body></html>"
+    http_server.response("/xhtml-worker", body=body, content_type="application/xhtml+xml")
+    calls = []
+
+    async def upload(**kwargs):
+        calls.append("upload")
+        assert kwargs["Body"] == body
+        assert kwargs["ContentType"] == "application/xhtml+xml"
+        assert kwargs["IfNoneMatch"] == "*"
+
+    async def submit(*args, **kwargs):
+        calls.append("submit")
+
+    async def ack():
+        calls.append("ack")
+
+    storage = ObjectStorage(settings)
+    storage._client = Mock(put_object=AsyncMock(side_effect=upload))
+    worker = FetcherWorker(settings)
+    worker.origin_policy = Mock(acquire=AsyncMock(), record_success=AsyncMock())
+    worker.storage = storage
+    owner = uuid4()
+    worker.lease_client = Mock(claim=AsyncMock(return_value=LeaseGrant(
+        owner, datetime.now(UTC) + timedelta(minutes=2))),
+        renew=AsyncMock(), submit=AsyncMock(side_effect=submit))
+    worker.resolver = public_resolver
+    event = FetchUrlEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1,
+                          url=http_server.url("/xhtml-worker"), depth=0)
+    message = Mock(body=event.model_dump_json().encode(), ack=AsyncMock(side_effect=ack))
+    async with local_session() as session:
+        worker.session = session
+        await worker.handle_message(message)
+    outcome = worker.lease_client.submit.await_args.args[0]
+    assert isinstance(outcome, PageFetchedEvent)
+    assert outcome.content_type == "application/xhtml+xml"
+    assert outcome.content_ref == storage._client.put_object.await_args.kwargs["Key"]
+    assert worker.lease_client.submit.await_args.kwargs["owner_token"] == owner
+    assert calls == ["upload", "submit", "ack"]
+
+
+@pytest.mark.asyncio
 async def test_classifies_socket_read_timeout(
     http_server: HttpServer, public_resolver: StubResolver
 ) -> None:

@@ -231,7 +231,7 @@ async def _fetch_html(
                     body=b"",
                     retry_after=response.headers.get("Retry-After"),
                 )
-            if content_type != "text/html":
+            if content_type not in {"text/html", "application/xhtml+xml"}:
                 raise NetworkFailure("unsupported_mime")
 
             chunks: list[bytes] = []
