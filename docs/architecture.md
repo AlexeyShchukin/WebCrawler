@@ -297,17 +297,17 @@ These controls belong to existing services; they do not require additional micro
 | Exponential backoff | Increase delay after each failure, capped at a configured maximum |
 | Jitter | Randomize each retry delay to prevent synchronized retry bursts |
 | `Retry-After` | Respect server-provided retry delay when present |
-| Rate limit | Limit concurrent requests and minimum delay per origin |
-| Circuit breaker | Open after repeated failures for an origin, pause requests, then probe after cooldown |
+| Rate limit | Enforce a minimum interval between Redis permissions per origin across replicas; limit total HTTP connections per replica |
+| Circuit breaker | Open after repeated failures for an origin and allow requests again after cooldown; successful outcomes clear failures and cooldown |
 | Redirects | Disable automatic redirects; validate every redirect target before following it |
 | SSRF protection | Resolve the hostname, validate every resolved address against blocked ranges immediately before connecting, and repeat this check for every redirect target to resist DNS rebinding |
 
 Fetcher owns outbound HTTP policy. All Fetcher replicas coordinate through Redis:
 
-- An atomic Redis operation enforces a per-origin minimum delay between HTTP requests across all Fetcher replicas.
-- Redis stores the circuit-breaker state, failure count, and cooldown for each origin.
+- An atomic Redis operation enforces a per-origin minimum interval between permissions across all Fetcher replicas. Permission precedes the HTTP request, so this does not guarantee spacing between actual request starts or limit simultaneous requests to the same origin.
+- Redis stores the circuit-breaker state, failure count, and cooldown for each origin. After cooldown, requests resume subject to the rate limit; no exclusive probe is reserved. A successful in-flight request can clear an open cooldown.
 - A Fetcher acquires origin permission before opening an HTTP connection.
-- If Redis is unavailable, Fetcher does not bypass the policy. It publishes the unchanged `FetchUrlEvent` to `crawler.retry` with routing key `fetch.url.retry.5s` and acknowledges the original only after the delayed copy has been successfully published and confirmed by RabbitMQ. TTL and dead-letter routing return it to `fetch.url.queue` with the same `fetch_attempt`.
+- If Redis is unavailable before the lease claim, Fetcher publishes the unchanged `FetchUrlEvent` to `crawler.retry` with routing key `fetch.url.retry.5s` and acknowledges the original only after broker confirmation. TTL and dead-letter routing return it to `fetch.url.queue` with the same `fetch_attempt`. For a redirect after the lease claim, a deferred origin is retried within the chain deadline; Redis unavailability produces a retryable outcome submitted to Frontier. No request bypasses the Redis permission check.
 
 Fetcher calculates a suggested retry delay only after a retryable fetch-execution failure. Frontier is the sole authority for attempt allocation, retry limits, and publishing the next primary `fetch.url` event. Frontier selects the smallest configured retry bucket that is not shorter than `suggested_delay_seconds`; the current buckets are 5 seconds, 30 seconds, 2 minutes, and 10 minutes, and delays above 10 minutes are capped at 10 minutes. The Fetcher/RabbitMQ delivery loop handles temporary failures before the HTTP lease claim through the 5-second bucket without allocating another attempt. `redis-py` provides an asyncio client, shared connection pool support, and Lua script registration for atomic operations. [redis-py asyncio documentation](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html).
 
@@ -649,6 +649,8 @@ All runtime configuration is supplied through environment variables. Secrets are
 | `FETCH_CONCURRENCY` | Fetcher | Maximum parallel HTTP requests per replica |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | Fetcher | Connection timeout |
 | `HTTP_READ_TIMEOUT_SECONDS` | Fetcher | Socket read timeout |
+| `HTTP_TOTAL_TIMEOUT_SECONDS` | Fetcher | Total timeout for each HTTP request, including body reading; default `60` |
+| `HTTP_CHAIN_TIMEOUT_SECONDS` | Fetcher | Overall deadline for DNS, redirects, admission and response reading; default `120` |
 | `HTTP_MAX_BODY_BYTES` | Fetcher | Maximum response size; default `5 MiB`, maximum `50 MiB` |
 | `ORIGIN_REQUESTS_PER_SECOND` | Fetcher | Per-origin request rate |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Fetcher | Consecutive failures before cooldown |

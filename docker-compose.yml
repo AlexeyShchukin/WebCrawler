@@ -219,18 +219,42 @@ services:
       - rabbitmq
 
   fetcher:
-    profiles: ["services"]
+    profiles: [ "services" ]
     restart: unless-stopped
+    stop_grace_period: 30s
     build:
       context: .
       dockerfile: services/fetcher-service/Dockerfile
     environment:
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:?set RABBITMQ_USER in .env}:${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}@rabbitmq:5672/
-      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+      RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-2}
+      REDIS_OPERATION_TIMEOUT_SECONDS: ${REDIS_OPERATION_TIMEOUT_SECONDS:-3}
       OBJECT_STORAGE_ENDPOINT: http://minio:9000
       OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
       OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
+      FRONTIER_INTERNAL_URL: http://frontier:8000
+      FETCH_CONCURRENCY: ${FETCH_CONCURRENCY:-10}
+      FETCH_LEASE_SECONDS: ${FETCH_LEASE_SECONDS:-120}
+      HTTP_CONNECT_TIMEOUT_SECONDS: ${HTTP_CONNECT_TIMEOUT_SECONDS:-10}
+      HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-30}
+      HTTP_TOTAL_TIMEOUT_SECONDS: ${HTTP_TOTAL_TIMEOUT_SECONDS:-60}
+      HTTP_CHAIN_TIMEOUT_SECONDS: ${HTTP_CHAIN_TIMEOUT_SECONDS:-120}
+      HTTP_MAX_BODY_BYTES: ${HTTP_MAX_BODY_BYTES:-5242880}
+      ORIGIN_REQUESTS_PER_SECOND: ${ORIGIN_REQUESTS_PER_SECOND:-1.0}
+      CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${CIRCUIT_BREAKER_FAILURE_THRESHOLD:-5}
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       rabbitmq-init:
         condition: service_completed_successfully
