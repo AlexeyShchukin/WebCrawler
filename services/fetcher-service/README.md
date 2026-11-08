@@ -35,7 +35,9 @@ Compose interpolation. Optional settings and defaults are:
 
 | Variable | Default |
 | --- | --- |
+| `FRONTIER_INTERNAL_URL` | `http://frontier:8000` |
 | `FETCH_CONCURRENCY` | 10 |
+| `FETCH_LEASE_SECONDS` | 120 |
 | `REDIS_CONNECT_TIMEOUT_SECONDS` | 2 |
 | `REDIS_OPERATION_TIMEOUT_SECONDS` | 3 |
 | `HTTP_CONNECT_TIMEOUT_SECONDS` | 10 |
@@ -49,6 +51,8 @@ Compose interpolation. Optional settings and defaults are:
 Redis timeouts must be positive and at most 10 seconds; the connection timeout
 must not exceed the operation timeout. The operation deadline includes connection
 acquisition and applies even when `REDIS_URL` contains client timeout parameters.
+`FETCH_LEASE_SECONDS` must match Frontier's configured lease duration; Fetcher
+renews the lease at one third of this interval.
 
 Without a valid `Retry-After`, Fetcher suggests a bounded exponential delay with
 integer additive jitter between the base delay and twice the base, capped at
@@ -58,8 +62,11 @@ suggested delays can still result in the same delivery time.
 Fetcher claims and renews a Frontier HTTP lease before and during a fetch, then
 submits `page.fetched`, `fetch.retry_requested`, or `page.failed` with the
 owner token. Frontier publishes the accepted outcome from its transactional
-outbox. If OriginPolicy blocks a request due to rate limiting or an open circuit breaker,
-Fetcher schedules it for retry without claiming a Frontier lease.
+outbox. If Redis policy defers the initial URL or is unavailable before the
+lease claim, Fetcher retries the unchanged delivery through the 5-second broker
+bucket. For a redirect after the lease claim, Fetcher waits for a deferred origin
+within the chain deadline; Redis unavailability produces a retryable outcome
+submitted to Frontier.
 HTML is stored in object storage; events contain the object reference
 rather than the body.
 
