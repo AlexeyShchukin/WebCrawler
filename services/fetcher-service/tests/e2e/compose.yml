@@ -1,0 +1,188 @@
+# Disposable acceptance stack. Never combine this file with production Compose.
+name: fetcher-audit-e2e
+
+x-frontier-env: &frontier-env
+  POSTGRES_USER: ${POSTGRES_USER:?use the repository .env.example}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?use the repository .env.example}
+  FRONTIER_DATABASE_HOST: postgres
+  FRONTIER_DATABASE_PORT: "5432"
+  FRONTIER_DATABASE_NAME: frontier_db
+  RABBITMQ_USER: ${RABBITMQ_USER:?use the repository .env.example}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?use the repository .env.example}
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: frontier_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d frontier_db']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [control]
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports: ["127.0.0.1:19867:5672", "127.0.0.1:19872:15672"]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    networks: [control]
+
+  rabbitmq-init:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQADMIN_TARGET_HOST: rabbitmq
+      RABBITMQADMIN_TARGET_PORT: "15672"
+      RABBITMQADMIN_USERNAME: ${RABBITMQ_USER}
+      RABBITMQADMIN_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQADMIN_NON_INTERACTIVE_MODE: "true"
+    volumes:
+      - ../../../../infrastructure/rabbitmq/bootstrap.sh:/usr/local/bin/bootstrap:ro
+      - ../../../../infrastructure/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    entrypoint: [/bin/sh, /usr/local/bin/bootstrap]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+    networks: [control]
+
+  redis:
+    image: redis:8-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?use the repository .env.example}
+    command: [sh, -c, 'exec redis-server --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    ports: ["127.0.0.1:19879:6379"]
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [control]
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?use the repository .env.example}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?use the repository .env.example}
+    ports: ["127.0.0.1:19900:9000"]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS http://localhost:9000/minio/health/live']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [control]
+
+  minio-init:
+    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
+      RAW_CONTENT_RETENTION_DAYS: "1"
+    volumes:
+      - ../../../../infrastructure/minio/bootstrap.sh:/usr/local/bin/bootstrap:ro
+    entrypoint: [/bin/sh, /usr/local/bin/bootstrap]
+    depends_on:
+      minio: {condition: service_healthy}
+    networks: [control]
+
+  frontier-migrate:
+    image: fetcher-audit-e2e-frontier
+    build:
+      context: ../../../..
+      dockerfile: services/frontier-service/Dockerfile
+    command: [alembic, upgrade, head]
+    environment: *frontier-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [control]
+
+  frontier:
+    image: fetcher-audit-e2e-frontier
+    environment:
+      <<: *frontier-env
+      OUTBOX_POLL_INTERVAL_SECONDS: "0.1"
+    ports: ["127.0.0.1:19880:8000"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      frontier-migrate: {condition: service_completed_successfully}
+      rabbitmq-init: {condition: service_completed_successfully}
+    networks: [control]
+
+  fixture:
+    image: fetcher-audit-e2e-fetcher
+    build:
+      context: ../../../..
+      dockerfile: services/fetcher-service/Dockerfile
+    command: [python, /test/fixture_server.py]
+    volumes:
+      - ./:/test:ro
+    ports: ["127.0.0.1:19889:8080"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      frontier: {condition: service_healthy}
+    networks:
+      control:
+      origin:
+        ipv4_address: 93.184.216.3
+
+  fetcher:
+    image: fetcher-audit-e2e-fetcher
+    stop_grace_period: 30s
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_HOST: fixture
+      RABBITMQ_PORT: "5673"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_HOST: redis
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
+      OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-crawler-raw-content}
+      FRONTIER_INTERNAL_URL: http://fixture:8080
+      ORIGIN_REQUESTS_PER_SECOND: "10"
+    ports: ["127.0.0.1:19881:8000"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      fixture: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+    networks:
+      control:
+      origin:
+        ipv4_address: 93.184.216.2
+
+networks:
+  control:
+  # A public-shaped address on an isolated network exercises real SSRF checks
+  # without an external website, DNS override or production allow-list bypass.
+  origin:
+    internal: true
+    ipam:
+      config:
+        - subnet: 93.184.216.0/28
