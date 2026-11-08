@@ -164,18 +164,33 @@ async def test_heartbeat_continues_while_policy_failure_is_bounded():
 
 @pytest.mark.asyncio
 async def test_lease_loss_cancels_hung_policy_record_before_submit():
+    recording = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def record_failure(_origin):
+        recording.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def lose_lease(**_kwargs):
+        await recording.wait()
+        raise LeaseLostError()
+
     settings = SimpleNamespace(fetch_lease_seconds=0.03, http_max_body_bytes=100,
                                http_chain_timeout_seconds=1)
     worker = FetcherWorker(settings)
-    worker.origin_policy = Mock(acquire=AsyncMock(), record_failure=policy().record_failure)
+    worker.origin_policy = Mock(acquire=AsyncMock(), record_failure=record_failure)
     worker.fetch = AsyncMock(side_effect=NetworkFailure("timeout"))
     worker.session = worker.resolver = None
     worker.lease_client = Mock(claim=AsyncMock(return_value=LeaseGrant(
         uuid4(), datetime.now(UTC) + timedelta(seconds=5))),
-        renew=AsyncMock(side_effect=LeaseLostError()), submit=AsyncMock())
+        renew=AsyncMock(side_effect=lose_lease), submit=AsyncMock())
     event = FetchUrlEvent(crawl_id=uuid4(), url_id=uuid4(), fetch_attempt=1,
                           url="https://example.com/", depth=0)
     message = Mock(body=event.model_dump_json().encode(), ack=AsyncMock())
     await asyncio.wait_for(worker.handle_message(message), 0.5)
+    assert cancelled.is_set()
     worker.lease_client.submit.assert_not_awaited()
     message.ack.assert_awaited_once()
