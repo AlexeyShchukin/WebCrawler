@@ -14,6 +14,8 @@ class ContentSettings(BaseSettings):
     database_url: str = Field(repr=False, exclude=True)
     rabbitmq_url: str = Field(repr=False, exclude=True)
     elasticsearch_url: str = Field(repr=False, exclude=True)
+    elasticsearch_index: str = Field(default="crawler-pages-v1", min_length=1)
+    elasticsearch_request_timeout_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
     object_storage_endpoint: str
     object_storage_access_key: SecretStr
     object_storage_secret_key: SecretStr
