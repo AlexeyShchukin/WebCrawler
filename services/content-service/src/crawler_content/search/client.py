@@ -28,7 +28,10 @@ class SearchClient:
     async def ensure_index(self) -> None:
         """Create the index or validate the index created by another worker."""
         try:
-            response = await self._client.indices.create(index=self._index, mappings=search_index_mapping())
+            response = await self._client.indices.create(
+                index=self._index,
+                mappings=search_index_mapping()
+            )
         except ApiError as error:
             body = error.body
             info = body.get("error") if isinstance(body, Mapping) else None

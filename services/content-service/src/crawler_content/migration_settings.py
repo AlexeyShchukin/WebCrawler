@@ -18,7 +18,9 @@ def database_url_from_environment(*, env_file: Path = LOCAL_ENV_FILE) -> str:
     if not username or not password:
         raise RuntimeError("Set DATABASE_URL or POSTGRES_USER and POSTGRES_PASSWORD")
     return URL.create(
-        "postgresql+asyncpg", username=username, password=password,
+        "postgresql+asyncpg",
+        username=username,
+        password=password,
         host=os.environ.get("CONTENT_DATABASE_HOST", "127.0.0.1"),
         port=int(os.environ.get("CONTENT_DATABASE_PORT", "5433")),
         database=os.environ.get("CONTENT_DATABASE_NAME", "content_db"),

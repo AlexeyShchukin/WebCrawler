@@ -20,6 +20,9 @@ class ContentSettings(BaseSettings):
     object_storage_access_key: SecretStr
     object_storage_secret_key: SecretStr
     object_storage_bucket: str = Field(min_length=1)
+    object_storage_connect_timeout_seconds: float = Field(default=5, gt=0, allow_inf_nan=False)
+    object_storage_read_timeout_seconds: float = Field(default=15, gt=0, allow_inf_nan=False)
+    object_storage_total_timeout_seconds: float = Field(default=30, gt=0, allow_inf_nan=False)
 
     postgres_user: str | None = Field(default=None, exclude=True, repr=False)
     postgres_password: str | None = Field(default=None, exclude=True, repr=False)
@@ -49,14 +52,24 @@ class ContentSettings(BaseSettings):
         if not isinstance(values, dict):
             return values
         values = values.copy()
-        if not values.get("database_url") and values.get("postgres_user") and values.get("postgres_password"):
+        if (
+                not values.get("database_url")
+                and values.get("postgres_user")
+                and values.get("postgres_password")
+        ):
             values["database_url"] = URL.create(
-                "postgresql+asyncpg", username=values["postgres_user"], password=values["postgres_password"],
+                "postgresql+asyncpg",
+                username=values["postgres_user"],
+                password=values["postgres_password"],
                 host=values.get("content_database_host", "postgres"),
                 port=int(values.get("content_database_port", 5432)),
                 database=values.get("content_database_name", "content_db"),
             ).render_as_string(hide_password=False)
-        if not values.get("rabbitmq_url") and values.get("rabbitmq_user") and values.get("rabbitmq_password"):
+        if (
+                not values.get("rabbitmq_url")
+                and values.get("rabbitmq_user")
+                and values.get("rabbitmq_password")
+        ):
             user = quote(values["rabbitmq_user"], safe="")
             password = quote(values["rabbitmq_password"], safe="")
             host = values.get("rabbitmq_host", "rabbitmq")

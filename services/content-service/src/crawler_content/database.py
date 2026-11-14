@@ -16,8 +16,10 @@ from crawler_content.settings import ContentSettings
 
 def create_engine(settings: ContentSettings) -> AsyncEngine:
     return create_async_engine(
-        settings.database_url, pool_size=settings.database_pool_size,
-        max_overflow=settings.database_max_overflow, pool_timeout=settings.database_pool_timeout_seconds,
+        settings.database_url,
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_timeout=settings.database_pool_timeout_seconds,
         pool_pre_ping=True,
     )
 

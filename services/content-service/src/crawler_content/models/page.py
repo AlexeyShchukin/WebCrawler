@@ -25,10 +25,26 @@ class Page(Base):
         UniqueConstraint("url_id", name="uq_pages_url_id"),
         CheckConstraint("fetch_attempt >= 1", name="ck_pages_attempt_positive"),
         CheckConstraint("http_status BETWEEN 100 AND 599", name="ck_pages_http_status"),
-        CheckConstraint("processing_state IN ('indexing_pending', 'indexed', 'failed')", name="ck_pages_state"),
-        CheckConstraint("processing_state = 'failed' OR (title IS NOT NULL AND text IS NOT NULL AND extracted_links IS NOT NULL)", name="ck_pages_extraction"),
-        CheckConstraint("(processing_state = 'indexed' AND indexed_at IS NOT NULL) OR (processing_state <> 'indexed' AND indexed_at IS NULL)", name="ck_pages_indexed_at"),
-        CheckConstraint("(processing_state = 'failed' AND error_category IS NOT NULL AND error_detail IS NOT NULL) OR (processing_state <> 'failed' AND error_category IS NULL AND error_detail IS NULL)", name="ck_pages_failure"),
+        CheckConstraint(
+            "processing_state IN ('indexing_pending', 'indexed', 'failed')",
+            name="ck_pages_state"
+        ),
+        CheckConstraint(
+            "processing_state = 'failed' OR "
+            "(title IS NOT NULL AND text IS NOT NULL AND extracted_links IS NOT NULL)",
+            name="ck_pages_extraction"
+        ),
+        CheckConstraint(
+            "(processing_state = 'indexed' AND indexed_at IS NOT NULL) OR "
+            "(processing_state <> 'indexed' AND indexed_at IS NULL)",
+            name="ck_pages_indexed_at"
+        ),
+        CheckConstraint(
+            "(processing_state = 'failed' AND error_category IS NOT NULL "
+            "AND error_detail IS NOT NULL) OR "
+            "(processing_state <> 'failed' AND error_category IS NULL AND error_detail IS NULL)",
+            name="ck_pages_failure"
+        ),
         Index("ix_pages_crawl_state", "crawl_id", "processing_state"),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -51,6 +67,14 @@ class Page(Base):
     text_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     title_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     links_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now
+    )
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
